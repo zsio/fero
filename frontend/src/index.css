@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+:root {
+  --background: #07090d;
+  --foreground: #f2f7fb;
+  --muted-foreground: #95a4b8;
+  --surface: rgba(11, 14, 18, 0.9);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-3: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.09);
+  --ring: rgba(102, 255, 225, 0.6);
+  --accent: #7dfbe1;
+  --accent-2: #b9ffe8;
+  --danger: #ff6b85;
+  --font-body: "IBM Plex Sans", "Segoe UI Variable", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-display: "Avenir Next Condensed", "DIN Alternate", "IBM Plex Sans", sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(77, 255, 216, 0.16), transparent 24%),
+    radial-gradient(circle at 85% 12%, rgba(80, 104, 255, 0.14), transparent 18%),
+    linear-gradient(180deg, #0b0e12 0%, #06070a 100%);
+  color: var(--foreground);
+  font-family: var(--font-body);
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black, transparent 92%);
+  opacity: 0.35;
+}
+
+button, input, textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(125, 251, 225, 0.3);
+}
+
+.storage-shell {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.panel-glow {
+  position: relative;
+}
+
+.panel-glow::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(125,251,225,0.24), transparent 42%, rgba(255,255,255,0.08));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
