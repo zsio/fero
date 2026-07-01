@@ -761,6 +761,60 @@ button:disabled {
   min-height: 38px;
 }
 
+.form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.74fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.test-button,
+.form-actions .submit-button {
+  min-width: 0;
+}
+
+.connection-result {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12181d;
+  padding: 10px 11px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.connection-result-ok {
+  border-color: rgba(117, 215, 180, 0.36);
+  background: rgba(117, 215, 180, 0.08);
+}
+
+.connection-result-failed {
+  border-color: rgba(239, 196, 90, 0.36);
+  background: rgba(239, 196, 90, 0.09);
+}
+
+.connection-result-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.connection-result-failed .connection-result-heading {
+  color: var(--amber);
+}
+
+.connection-result-heading strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connection-result small {
+  color: var(--muted);
+}
+
 .mount-details {
   display: grid;
   gap: 8px;

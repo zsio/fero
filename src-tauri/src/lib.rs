@@ -129,6 +129,19 @@ struct NetworkDriveResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct NetworkDriveTestResult {
+    ok: bool,
+    protocol: String,
+    fs: String,
+    summary: String,
+    recommendation: String,
+    details: Option<String>,
+    item_count: Option<usize>,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RemoveDriveResult {
     drive: SavedDrive,
     unmount: Option<Value>,
@@ -821,6 +834,96 @@ fn already_mounted_error(message: &str) -> bool {
         || lower.contains("already exists")
 }
 
+fn diagnose_connection_error(message: &str) -> (String, String) {
+    let lower = message.to_ascii_lowercase();
+
+    if lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("permission denied")
+        || lower.contains("authentication")
+        || lower.contains("login")
+        || lower.contains("401")
+        || lower.contains("403")
+    {
+        return (
+            "Fero reached the server, but the credentials were not accepted.".to_string(),
+            "Check the username, password, app token, domain, and whether this account can access the selected folder.".to_string(),
+        );
+    }
+
+    if lower.contains("no such host")
+        || lower.contains("dns")
+        || lower.contains("lookup")
+        || lower.contains("could not resolve")
+    {
+        return (
+            "Fero could not find that server address.".to_string(),
+            "Check the host name or URL, remove accidental spaces, and confirm the address works from this computer.".to_string(),
+        );
+    }
+
+    if lower.contains("connection refused") || lower.contains("actively refused") {
+        return (
+            "The server refused the connection.".to_string(),
+            "Check the port, protocol, firewall, VPN, and whether the storage service is running."
+                .to_string(),
+        );
+    }
+
+    if lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("deadline")
+        || lower.contains("i/o timeout")
+    {
+        return (
+            "The server did not respond in time.".to_string(),
+            "Check the network connection, VPN, firewall, and whether this storage service is reachable right now.".to_string(),
+        );
+    }
+
+    if lower.contains("certificate")
+        || lower.contains("tls")
+        || lower.contains("ssl")
+        || lower.contains("x509")
+    {
+        return (
+            "The secure connection could not be verified.".to_string(),
+            "Check the HTTPS certificate, server date, and whether a company proxy is intercepting secure traffic.".to_string(),
+        );
+    }
+
+    if lower.contains("not found")
+        || lower.contains("no such file")
+        || lower.contains("no such directory")
+        || lower.contains("doesn't exist")
+        || lower.contains("share")
+    {
+        return (
+            "Fero connected, but the folder or share was not found.".to_string(),
+            "Check the SMB share name or remote folder path, then try the test again.".to_string(),
+        );
+    }
+
+    (
+        "Fero could not verify this network drive.".to_string(),
+        "Open diagnostics for the rclone response, then check the server address, credentials, and remote folder.".to_string(),
+    )
+}
+
+fn connection_failure_result(protocol: String, fs: String, err: String) -> NetworkDriveTestResult {
+    let (summary, recommendation) = diagnose_connection_error(&err);
+    NetworkDriveTestResult {
+        ok: false,
+        protocol,
+        fs,
+        summary,
+        recommendation,
+        details: Some(err),
+        item_count: None,
+        warnings: Vec::new(),
+    }
+}
+
 #[tauri::command]
 fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOverview, String> {
     let paths = resolve_paths(&app)?;
@@ -988,6 +1091,79 @@ fn create_network_drive(
         remote,
         mount,
     })
+}
+
+#[tauri::command]
+fn test_network_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: NetworkDriveRequest,
+) -> Result<NetworkDriveTestResult, String> {
+    let (protocol, parameters) = protocol_parameters(&request)?;
+    let remote_name = format!("test_{protocol}_{}", short_nonce());
+    let fs = build_remote_fs(
+        &remote_name,
+        &protocol,
+        &request.share,
+        &request.remote_path,
+    )?;
+
+    let mut manager = lock_manager(&state)?;
+    if let Err(err) = manager.ensure_started(&app) {
+        return Ok(connection_failure_result(protocol, fs, err));
+    }
+
+    if let Err(err) = manager.call_rc(
+        "config/create",
+        json!({
+            "name": &remote_name,
+            "type": &protocol,
+            "parameters": parameters,
+            "opt": {
+                "obscure": true,
+            },
+        }),
+    ) {
+        return Ok(connection_failure_result(protocol, fs, err));
+    }
+
+    let probe = manager.call_rc(
+        "operations/list",
+        json!({
+            "fs": &fs,
+            "remote": "",
+        }),
+    );
+
+    let mut warnings = Vec::new();
+    if let Err(err) = manager.call_rc("config/delete", json!({ "name": &remote_name })) {
+        warnings.push(format!("Temporary remote cleanup failed: {err}"));
+    }
+
+    match probe {
+        Ok(value) => {
+            let item_count = value
+                .get("list")
+                .or_else(|| value.get("List"))
+                .and_then(Value::as_array)
+                .map(Vec::len);
+            Ok(NetworkDriveTestResult {
+                ok: true,
+                protocol,
+                fs,
+                summary: "Connection verified.".to_string(),
+                recommendation: "This network drive can be mounted. Choose a local folder, then connect and mount it.".to_string(),
+                details: None,
+                item_count,
+                warnings,
+            })
+        }
+        Err(err) => {
+            let mut result = connection_failure_result(protocol, fs, err);
+            result.warnings = warnings;
+            Ok(result)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1205,6 +1381,7 @@ pub fn run() {
             start_transfer,
             start_mount,
             create_network_drive,
+            test_network_drive,
             mount_saved_drive,
             restore_saved_drives,
             set_drive_auto_mount,

@@ -111,6 +111,17 @@ type RestoreDrivesResult = {
   items: RestoreDriveItem[];
 };
 
+type NetworkDriveTestResult = {
+  ok: boolean;
+  protocol: string;
+  fs: string;
+  summary: string;
+  recommendation: string;
+  details?: string | null;
+  itemCount?: number | null;
+  warnings: string[];
+};
+
 type DriveForm = {
   protocol: ProtocolId;
   displayName: string;
@@ -216,6 +227,8 @@ function App() {
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreResult, setRestoreResult] = useState<RestoreDrivesResult | null>(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTest, setConnectionTest] = useState<NetworkDriveTestResult | null>(null);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
@@ -235,11 +248,10 @@ function App() {
     [driveItems, selectedDriveId],
   );
 
-  const canCreateDrive =
-    drive.displayName.trim() &&
-    drive.mountPoint.trim() &&
+  const canTestDrive =
     (drive.protocol === "webdav" ? drive.url.trim() : drive.host.trim()) &&
     (drive.protocol === "smb" ? drive.share.trim() : true);
+  const canCreateDrive = drive.displayName.trim() && drive.mountPoint.trim() && canTestDrive;
 
   function updateActiveMounts(nextMounts: MountSession[], savedDrives = overview.drives) {
     setActiveMounts(nextMounts);
@@ -318,6 +330,30 @@ function App() {
     );
     if (result) {
       setDrive(makeDefaultForm(drive.protocol));
+    }
+  }
+
+  async function testConnection() {
+    if (!canTestDrive) return;
+    setBusy(true);
+    setTestingConnection(true);
+    setError(null);
+    try {
+      const result = await invoke<NetworkDriveTestResult>("test_network_drive", {
+        request: toNetworkDriveRequest(drive),
+      });
+      setConnectionTest(result);
+      setOutput(result);
+      const nextOverview = await refreshOverview();
+      if (nextOverview.daemon.running) {
+        await refreshMountsFromDaemon(false, nextOverview.drives);
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+      setDiagnosticsOpen(true);
+    } finally {
+      setTestingConnection(false);
+      setBusy(false);
     }
   }
 
@@ -419,6 +455,21 @@ function App() {
   useEffect(() => {
     void bootstrapApp();
   }, []);
+
+  useEffect(() => {
+    setConnectionTest(null);
+  }, [
+    drive.protocol,
+    drive.url,
+    drive.host,
+    drive.port,
+    drive.username,
+    drive.password,
+    drive.domain,
+    drive.share,
+    drive.remotePath,
+    drive.webdavVendor,
+  ]);
 
   return (
     <main className="app-shell">
@@ -676,10 +727,18 @@ function App() {
                   />
                 </div>
 
-                <button className="submit-button" type="submit" disabled={busy || !canCreateDrive}>
-                  {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                  <span>Connect and mount</span>
-                </button>
+                {connectionTest && <ConnectionTestPanel result={connectionTest} />}
+
+                <div className="form-actions">
+                  <button className="secondary-button test-button" type="button" disabled={busy || !canTestDrive} onClick={() => void testConnection()}>
+                    {testingConnection ? <Loader2 className="spin" size={16} /> : <Wifi size={16} />}
+                    <span>{testingConnection ? "Testing" : "Test connection"}</span>
+                  </button>
+                  <button className="submit-button" type="submit" disabled={busy || !canCreateDrive}>
+                    {busy && !testingConnection ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                    <span>Connect and mount</span>
+                  </button>
+                </div>
               </form>
             </section>
 
@@ -851,6 +910,23 @@ function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCr
         <Plus size={16} />
         <span>Add network drive</span>
       </button>
+    </div>
+  );
+}
+
+function ConnectionTestPanel({ result }: { result: NetworkDriveTestResult }) {
+  const Icon = result.ok ? ShieldCheck : AlertTriangle;
+  return (
+    <div className={`connection-result ${result.ok ? "connection-result-ok" : "connection-result-failed"}`}>
+      <div className="connection-result-heading">
+        <Icon size={16} />
+        <strong>{result.summary}</strong>
+      </div>
+      <span>{result.recommendation}</span>
+      {result.ok && typeof result.itemCount === "number" && (
+        <small>{result.itemCount} item{result.itemCount === 1 ? "" : "s"} visible in the checked folder.</small>
+      )}
+      {result.warnings.length > 0 && <small>{result.warnings.join(" ")}</small>}
     </div>
   );
 }
