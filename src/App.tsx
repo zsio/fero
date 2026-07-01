@@ -17,6 +17,7 @@ import {
   Loader2,
   LockKeyhole,
   Network,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -80,6 +81,13 @@ type SavedDrive = {
   remotePath: string;
   cacheMode: string;
   autoMount?: boolean;
+  url?: string | null;
+  host?: string | null;
+  port?: string | null;
+  username?: string | null;
+  domain?: string | null;
+  share?: string | null;
+  webdavVendor?: string | null;
   createdAt: number;
 };
 
@@ -95,6 +103,14 @@ type DriveListItem = {
   mounted: boolean;
   fs: string;
   autoMount: boolean;
+  remotePath: string;
+  url?: string | null;
+  host?: string | null;
+  port?: string | null;
+  username?: string | null;
+  domain?: string | null;
+  share?: string | null;
+  webdavVendor?: string | null;
 };
 
 type RestoreDriveItem = {
@@ -229,6 +245,10 @@ function App() {
   const [restoreResult, setRestoreResult] = useState<RestoreDrivesResult | null>(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionTest, setConnectionTest] = useState<NetworkDriveTestResult | null>(null);
+  const [editingDriveId, setEditingDriveId] = useState<string | null>(null);
+  const [editDrive, setEditDrive] = useState<DriveForm | null>(null);
+  const [editConnectionTest, setEditConnectionTest] = useState<NetworkDriveTestResult | null>(null);
+  const [testingEditConnection, setTestingEditConnection] = useState(false);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
@@ -248,10 +268,11 @@ function App() {
     [driveItems, selectedDriveId],
   );
 
-  const canTestDrive =
-    (drive.protocol === "webdav" ? drive.url.trim() : drive.host.trim()) &&
-    (drive.protocol === "smb" ? drive.share.trim() : true);
-  const canCreateDrive = drive.displayName.trim() && drive.mountPoint.trim() && canTestDrive;
+  const canTestDrive = canTestDriveForm(drive);
+  const canCreateDrive = canSaveDriveForm(drive);
+  const canTestEditDrive = editDrive ? canTestDriveForm(editDrive) : false;
+  const canSaveEditDrive = editDrive ? canSaveDriveForm(editDrive) : false;
+  const isEditingSelectedDrive = Boolean(selectedDrive && editDrive && editingDriveId === selectedDrive.id);
 
   function updateActiveMounts(nextMounts: MountSession[], savedDrives = overview.drives) {
     setActiveMounts(nextMounts);
@@ -333,6 +354,19 @@ function App() {
     }
   }
 
+  function startEditingDrive(item: DriveListItem) {
+    setEditingDriveId(item.id);
+    setEditDrive(formFromDriveItem(item));
+    setEditConnectionTest(null);
+  }
+
+  function stopEditingDrive() {
+    setEditingDriveId(null);
+    setEditDrive(null);
+    setEditConnectionTest(null);
+    setTestingEditConnection(false);
+  }
+
   async function testConnection() {
     if (!canTestDrive) return;
     setBusy(true);
@@ -357,6 +391,45 @@ function App() {
     }
   }
 
+  async function testEditedConnection() {
+    if (!editDrive || !canTestEditDrive) return;
+    setBusy(true);
+    setTestingEditConnection(true);
+    setError(null);
+    try {
+      const result = await invoke<NetworkDriveTestResult>("test_network_drive", {
+        request: toNetworkDriveRequest(editDrive),
+      });
+      setEditConnectionTest(result);
+      setOutput(result);
+      const nextOverview = await refreshOverview();
+      if (nextOverview.daemon.running) {
+        await refreshMountsFromDaemon(false, nextOverview.drives);
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+      setDiagnosticsOpen(true);
+    } finally {
+      setTestingEditConnection(false);
+      setBusy(false);
+    }
+  }
+
+  async function saveEditedDrive(item: DriveListItem) {
+    if (!editDrive || !canSaveEditDrive) return;
+    const result = await runAction(
+      () =>
+        invoke("update_saved_drive", {
+          driveId: item.id,
+          request: toNetworkDriveRequest(editDrive),
+        }),
+      { refreshMounts: true },
+    );
+    if (result) {
+      stopEditingDrive();
+    }
+  }
+
   async function chooseLocalFolder() {
     try {
       const selected = await openDialog({
@@ -366,6 +439,21 @@ function App() {
       });
       if (typeof selected === "string") {
         setDrive((current) => ({ ...current, mountPoint: selected }));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function chooseEditLocalFolder() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Choose a local folder for this network drive",
+      });
+      if (typeof selected === "string") {
+        setEditDrive((current) => (current ? { ...current, mountPoint: selected } : current));
       }
     } catch (err) {
       setError(errorMessage(err));
@@ -470,6 +558,27 @@ function App() {
     drive.remotePath,
     drive.webdavVendor,
   ]);
+
+  useEffect(() => {
+    setEditConnectionTest(null);
+  }, [
+    editDrive?.protocol,
+    editDrive?.url,
+    editDrive?.host,
+    editDrive?.port,
+    editDrive?.username,
+    editDrive?.password,
+    editDrive?.domain,
+    editDrive?.share,
+    editDrive?.remotePath,
+    editDrive?.webdavVendor,
+  ]);
+
+  useEffect(() => {
+    if (editingDriveId && selectedDrive?.id !== editingDriveId) {
+      stopEditingDrive();
+    }
+  }, [selectedDrive?.id, editingDriveId]);
 
   return (
     <main className="app-shell">
@@ -743,8 +852,26 @@ function App() {
             </section>
 
             <section className="pane-section">
-              <PaneHeader title="Selected drive" meta={selectedDrive ? selectedDrive.status : "None selected"} icon={Activity} />
-              {selectedDrive ? (
+              <PaneHeader
+                title={isEditingSelectedDrive ? "Edit drive" : "Selected drive"}
+                meta={selectedDrive ? selectedDrive.status : "None selected"}
+                icon={isEditingSelectedDrive ? Pencil : Activity}
+              />
+              {selectedDrive && isEditingSelectedDrive && editDrive ? (
+                <EditDriveSettings
+                  form={editDrive}
+                  busy={busy}
+                  testingConnection={testingEditConnection}
+                  connectionTest={editConnectionTest}
+                  canTest={canTestEditDrive}
+                  canSave={canSaveEditDrive}
+                  onChange={(patch) => setEditDrive((current) => (current ? { ...current, ...patch } : current))}
+                  onBrowse={() => void chooseEditLocalFolder()}
+                  onTest={() => void testEditedConnection()}
+                  onCancel={stopEditingDrive}
+                  onSave={() => void saveEditedDrive(selectedDrive)}
+                />
+              ) : selectedDrive ? (
                 <MountDetails
                   drive={selectedDrive}
                   busy={busy}
@@ -757,6 +884,7 @@ function App() {
                   }
                   onRemove={() => void removeSavedDrive(selectedDrive)}
                   onAutoMountChange={(autoMount) => void setDriveAutoMount(selectedDrive, autoMount)}
+                  onEdit={() => startEditingDrive(selectedDrive)}
                 />
               ) : (
                 <div className="empty-detail">
@@ -931,6 +1059,159 @@ function ConnectionTestPanel({ result }: { result: NetworkDriveTestResult }) {
   );
 }
 
+function EditDriveSettings({
+  form,
+  busy,
+  testingConnection,
+  connectionTest,
+  canTest,
+  canSave,
+  onChange,
+  onBrowse,
+  onTest,
+  onCancel,
+  onSave,
+}: {
+  form: DriveForm;
+  busy: boolean;
+  testingConnection: boolean;
+  connectionTest: NetworkDriveTestResult | null;
+  canTest: boolean;
+  canSave: boolean;
+  onChange: (patch: Partial<DriveForm>) => void;
+  onBrowse: () => void;
+  onTest: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const protocol = protocols.find((item) => item.id === form.protocol) ?? protocols[0];
+  const ProtocolIcon = protocol.icon;
+  return (
+    <form
+      className="edit-drive-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSave();
+      }}
+    >
+      <div className="edit-protocol-line">
+        <ProtocolIcon size={15} />
+        <span>{protocol.label}</span>
+      </div>
+
+      <TextInput
+        label="Drive name"
+        value={form.displayName}
+        onChange={(value) => onChange({ displayName: value })}
+        placeholder={protocol.defaultName}
+      />
+
+      {form.protocol === "webdav" ? (
+        <TextInput
+          label="WebDAV address"
+          value={form.url}
+          onChange={(value) => onChange({ url: value })}
+          placeholder="https://cloud.example.com/remote.php/dav/files/me/"
+        />
+      ) : (
+        <div className="form-grid two">
+          <TextInput
+            label="Server"
+            value={form.host}
+            onChange={(value) => onChange({ host: value })}
+            placeholder={form.protocol === "smb" ? "NAS.local" : "files.example.com"}
+          />
+          <TextInput
+            label="Port"
+            value={form.port}
+            onChange={(value) => onChange({ port: value })}
+            placeholder={protocol.defaultPort || "default"}
+          />
+        </div>
+      )}
+
+      {form.protocol === "smb" && (
+        <div className="form-grid two">
+          <TextInput label="Share name" value={form.share} onChange={(value) => onChange({ share: value })} placeholder="Media" />
+          <TextInput label="Domain" value={form.domain} onChange={(value) => onChange({ domain: value })} placeholder="optional" />
+        </div>
+      )}
+
+      <div className="form-grid two">
+        <TextInput label="Username" value={form.username} onChange={(value) => onChange({ username: value })} placeholder="optional" />
+        <TextInput label="Password" type="password" value={form.password} onChange={(value) => onChange({ password: value })} placeholder="keep current" />
+      </div>
+
+      <div className="form-grid two">
+        <TextInput
+          label="Remote folder"
+          value={form.remotePath}
+          onChange={(value) => onChange({ remotePath: value })}
+          placeholder={form.protocol === "smb" ? "optional subfolder" : "/"}
+        />
+        <TextInput
+          label="Local folder"
+          value={form.mountPoint}
+          onChange={(value) => onChange({ mountPoint: value })}
+          placeholder="Choose folder"
+          action={
+            <button className="field-action" type="button" onClick={onBrowse}>
+              <FolderOpen size={14} />
+              <span>Browse</span>
+            </button>
+          }
+        />
+      </div>
+
+      <div className="form-grid two">
+        {form.protocol === "webdav" ? (
+          <SelectInput
+            label="WebDAV type"
+            value={form.webdavVendor}
+            onChange={(value) => onChange({ webdavVendor: value })}
+            options={[
+              { value: "other", label: "Generic WebDAV" },
+              { value: "nextcloud", label: "Nextcloud" },
+              { value: "owncloud", label: "ownCloud" },
+              { value: "sharepoint", label: "SharePoint" },
+            ]}
+          />
+        ) : (
+          <ProtocolHint protocol={protocol} />
+        )}
+        <SelectInput
+          label="Cache"
+          value={form.cacheMode}
+          onChange={(value) => onChange({ cacheMode: value as CacheMode })}
+          options={[
+            { value: "smart", label: "Smart cache" },
+            { value: "full", label: "Full cache" },
+            { value: "off", label: "No cache" },
+          ]}
+        />
+      </div>
+
+      {connectionTest && <ConnectionTestPanel result={connectionTest} />}
+
+      <div className="form-actions edit-form-actions">
+        <button className="secondary-button test-button" type="button" disabled={busy || !canTest} onClick={onTest}>
+          {testingConnection ? <Loader2 className="spin" size={16} /> : <Wifi size={16} />}
+          <span>{testingConnection ? "Testing" : "Test connection"}</span>
+        </button>
+        <button className="submit-button" type="submit" disabled={busy || !canSave}>
+          {busy && !testingConnection ? <Loader2 className="spin" size={16} /> : <Pencil size={16} />}
+          <span>Save changes</span>
+        </button>
+      </div>
+
+      <button className="secondary-button cancel-edit-button" type="button" disabled={busy} onClick={onCancel}>
+        <XCircle size={15} />
+        <span>Cancel</span>
+      </button>
+    </form>
+  );
+}
+
 function MountDetails({
   drive,
   busy,
@@ -939,6 +1220,7 @@ function MountDetails({
   onUnmount,
   onRemove,
   onAutoMountChange,
+  onEdit,
 }: {
   drive: DriveListItem;
   busy: boolean;
@@ -947,6 +1229,7 @@ function MountDetails({
   onUnmount: () => void;
   onRemove: () => void;
   onAutoMountChange: (autoMount: boolean) => void;
+  onEdit: () => void;
 }) {
   return (
     <div className="mount-details">
@@ -982,6 +1265,10 @@ function MountDetails({
       <button className="secondary-button preference-button" type="button" disabled={busy} onClick={() => onAutoMountChange(!drive.autoMount)}>
         <RefreshCw size={15} />
         <span>{drive.autoMount ? "Disable auto mount" : "Restore on launch"}</span>
+      </button>
+      <button className="secondary-button preference-button" type="button" disabled={busy} onClick={onEdit}>
+        <Pencil size={15} />
+        <span>Edit settings</span>
       </button>
       <button className="danger-button" type="button" disabled={busy} onClick={onRemove}>
         <Trash2 size={15} />
@@ -1085,6 +1372,37 @@ function makeDefaultForm(protocol: ProtocolId): DriveForm {
   };
 }
 
+function canTestDriveForm(form: DriveForm) {
+  return Boolean(
+    (form.protocol === "webdav" ? form.url.trim() : form.host.trim()) &&
+      (form.protocol === "smb" ? form.share.trim() : true),
+  );
+}
+
+function canSaveDriveForm(form: DriveForm) {
+  return Boolean(form.displayName.trim() && form.mountPoint.trim() && canTestDriveForm(form));
+}
+
+function formFromDriveItem(item: DriveListItem): DriveForm {
+  const protocol = normalizeProtocolId(item.protocol);
+  const definition = protocols.find((entry) => entry.id === protocol) ?? protocols[0];
+  return {
+    protocol,
+    displayName: item.displayName,
+    url: item.url ?? "",
+    host: item.host ?? "",
+    port: item.port ?? definition.defaultPort,
+    username: item.username ?? "",
+    password: "",
+    domain: item.domain ?? "",
+    share: item.share ?? "",
+    remotePath: item.remotePath ?? "",
+    mountPoint: item.mountPoint,
+    webdavVendor: item.webdavVendor ?? "other",
+    cacheMode: normalizeCacheMode(item.cacheMode),
+  };
+}
+
 function toNetworkDriveRequest(form: DriveForm) {
   return {
     protocol: form.protocol,
@@ -1101,6 +1419,19 @@ function toNetworkDriveRequest(form: DriveForm) {
     webdavVendor: form.webdavVendor,
     cacheMode: form.cacheMode,
   };
+}
+
+function normalizeProtocolId(protocol: string): ProtocolId {
+  const lower = protocol.toLowerCase();
+  if (lower === "ftp" || lower === "sftp" || lower === "smb" || lower === "webdav") {
+    return lower;
+  }
+  return "webdav";
+}
+
+function normalizeCacheMode(mode: string): CacheMode {
+  if (mode === "full" || mode === "off" || mode === "smart") return mode;
+  return "smart";
 }
 
 function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[]): DriveListItem[] {
@@ -1120,6 +1451,14 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       mounted: Boolean(active),
       fs: drive.fs,
       autoMount: drive.autoMount !== false,
+      remotePath: drive.remotePath,
+      url: drive.url,
+      host: drive.host,
+      port: drive.port,
+      username: drive.username,
+      domain: drive.domain,
+      share: drive.share,
+      webdavVendor: drive.webdavVendor,
     } satisfies DriveListItem;
   });
 
@@ -1138,6 +1477,7 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       mounted: true,
       fs: mount.remote,
       autoMount: false,
+      remotePath: "",
     }) satisfies DriveListItem);
 
   return [...savedItems, ...orphanMounts];

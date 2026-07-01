@@ -142,6 +142,15 @@ struct NetworkDriveTestResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct UpdateDriveResult {
+    drive: SavedDrive,
+    remote: Value,
+    remounted: bool,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RemoveDriveResult {
     drive: SavedDrive,
     unmount: Option<Value>,
@@ -184,6 +193,20 @@ struct SavedDrive {
     cache_mode: String,
     #[serde(default = "default_auto_mount")]
     auto_mount: bool,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    port: Option<String>,
+    #[serde(default)]
+    username: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+    #[serde(default)]
+    share: Option<String>,
+    #[serde(default)]
+    webdav_vendor: Option<String>,
     created_at: u128,
 }
 
@@ -764,6 +787,18 @@ fn delete_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, String> {
     Ok(drive)
 }
 
+fn update_drive(app: &AppHandle, updated_drive: SavedDrive) -> Result<SavedDrive, String> {
+    let mut drives = read_drive_catalog(app)?;
+    let index = drives
+        .iter()
+        .position(|drive| drive.id == updated_drive.id)
+        .ok_or_else(|| "saved drive was not found".to_string())?;
+    drives[index] = updated_drive.clone();
+    drives.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    write_drive_catalog(app, &drives)?;
+    Ok(updated_drive)
+}
+
 fn find_saved_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, String> {
     read_drive_catalog(app)?
         .into_iter()
@@ -798,6 +833,29 @@ fn mount_drive(manager: &RcloneManager, drive: &SavedDrive) -> Result<Value, Str
             },
         }),
     )
+}
+
+fn apply_request_to_drive(
+    mut drive: SavedDrive,
+    request: &NetworkDriveRequest,
+    display_name: String,
+    mount_point: String,
+    fs: String,
+    cache_mode: String,
+) -> SavedDrive {
+    drive.display_name = display_name;
+    drive.fs = fs;
+    drive.mount_point = mount_point;
+    drive.remote_path = optional_text(&request.remote_path).unwrap_or_default();
+    drive.cache_mode = cache_mode;
+    drive.url = optional_text(&request.url);
+    drive.host = optional_text(&request.host);
+    drive.port = optional_text(&request.port);
+    drive.username = optional_text(&request.username);
+    drive.domain = optional_text(&request.domain);
+    drive.share = optional_text(&request.share);
+    drive.webdav_vendor = optional_text(&request.webdav_vendor);
+    drive
 }
 
 fn mounted_paths_from_value(value: &Value) -> Vec<String> {
@@ -1076,6 +1134,13 @@ fn create_network_drive(
             remote_path: optional_text(&request.remote_path).unwrap_or_default(),
             cache_mode: cache_mode.clone(),
             auto_mount: true,
+            url: optional_text(&request.url),
+            host: optional_text(&request.host),
+            port: optional_text(&request.port),
+            username: optional_text(&request.username),
+            domain: optional_text(&request.domain),
+            share: optional_text(&request.share),
+            webdav_vendor: optional_text(&request.webdav_vendor),
             created_at: now_millis(),
         },
     )?;
@@ -1164,6 +1229,88 @@ fn test_network_drive(
             Ok(result)
         }
     }
+}
+
+#[tauri::command]
+fn update_saved_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drive_id: String,
+    request: NetworkDriveRequest,
+) -> Result<UpdateDriveResult, String> {
+    let existing = find_saved_drive(&app, &drive_id)?;
+    let display_name = required_text(&request.display_name, "Drive name")?;
+    let mount_point = required_text(&request.mount_point, "Local mount folder")?;
+    let requested_protocol = request.protocol.trim().to_ascii_lowercase();
+
+    if requested_protocol != existing.protocol {
+        return Err("Changing a saved drive protocol is not supported yet. Create a new drive for a different protocol.".to_string());
+    }
+
+    let (protocol, parameters) = protocol_parameters(&request)?;
+    let fs = build_remote_fs(
+        &existing.remote_name,
+        &protocol,
+        &request.share,
+        &request.remote_path,
+    )?;
+    let (cache_mode, _) = cache_mode_value(&request.cache_mode);
+    std::fs::create_dir_all(PathBuf::from(&mount_point))
+        .map_err(|err| format!("failed to create local mount folder {mount_point}: {err}"))?;
+
+    let mut manager = lock_manager(&state)?;
+    manager.ensure_started(&app)?;
+    let mounted_paths = manager
+        .call_rc("mount/listmounts", json!({}))
+        .map(|value| mounted_paths_from_value(&value))
+        .unwrap_or_default();
+    let was_mounted = mounted_paths
+        .iter()
+        .any(|path| path == &existing.mount_point);
+
+    let remote = manager.call_rc(
+        "config/update",
+        json!({
+            "name": &existing.remote_name,
+            "parameters": parameters,
+            "opt": {
+                "obscure": true,
+            },
+        }),
+    )?;
+
+    let updated = apply_request_to_drive(
+        existing.clone(),
+        &request,
+        display_name,
+        mount_point,
+        fs,
+        cache_mode,
+    );
+    let drive = update_drive(&app, updated)?;
+
+    let mut remounted = false;
+    let mut warnings = Vec::new();
+    if was_mounted {
+        if let Err(err) = manager.call_rc(
+            "mount/unmount",
+            json!({ "mountPoint": &existing.mount_point }),
+        ) {
+            warnings.push(format!("Old mount could not be stopped: {err}"));
+        }
+
+        match mount_drive(&manager, &drive) {
+            Ok(_) => remounted = true,
+            Err(err) => warnings.push(format!("Saved settings, but remount failed: {err}")),
+        }
+    }
+
+    Ok(UpdateDriveResult {
+        drive,
+        remote,
+        remounted,
+        warnings,
+    })
 }
 
 #[tauri::command]
@@ -1382,6 +1529,7 @@ pub fn run() {
             start_mount,
             create_network_drive,
             test_network_drive,
+            update_saved_drive,
             mount_saved_drive,
             restore_saved_drives,
             set_drive_auto_mount,
