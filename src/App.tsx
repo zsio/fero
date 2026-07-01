@@ -53,6 +53,7 @@ type AppOverview = {
   paths: {
     appConfigDir: string;
     rcloneConfig: string;
+    rcloneCache: string;
     rcloneLog: string;
     driveCatalog: string;
   };
@@ -148,6 +149,26 @@ type NetworkDriveTestResult = {
   warnings: string[];
 };
 
+type DriveCacheStatus = {
+  driveId: string;
+  cacheMode: string;
+  cacheRoot: string;
+  driveCachePaths: string[];
+  driveBytes: number;
+  totalBytes: number;
+  fileCount: number;
+  mounted: boolean;
+  lastScannedAt: number;
+  message: string;
+};
+
+type ClearDriveCacheResult = {
+  status: DriveCacheStatus;
+  removedBytes: number;
+  removedPaths: string[];
+  warnings: string[];
+};
+
 type DriveForm = {
   protocol: ProtocolId;
   displayName: string;
@@ -229,6 +250,7 @@ const emptyOverview: AppOverview = {
   paths: {
     appConfigDir: "",
     rcloneConfig: "",
+    rcloneCache: "",
     rcloneLog: "",
     driveCatalog: "",
   },
@@ -259,6 +281,8 @@ function App() {
   const [editDrive, setEditDrive] = useState<DriveForm | null>(null);
   const [editConnectionTest, setEditConnectionTest] = useState<NetworkDriveTestResult | null>(null);
   const [testingEditConnection, setTestingEditConnection] = useState(false);
+  const [cacheStatusByDrive, setCacheStatusByDrive] = useState<Record<string, DriveCacheStatus>>({});
+  const [cacheBusyDriveId, setCacheBusyDriveId] = useState<string | null>(null);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
@@ -486,6 +510,40 @@ function App() {
     );
   }
 
+  async function loadCacheStatus(item: DriveListItem, showOutput = false) {
+    setCacheBusyDriveId(item.id);
+    setError(null);
+    try {
+      const status = await invoke<DriveCacheStatus>("get_cache_status", { driveId: item.id });
+      setCacheStatusByDrive((current) => ({ ...current, [item.id]: status }));
+      if (showOutput) setOutput(status);
+      return status;
+    } catch (err) {
+      setError(errorMessage(err));
+      return null;
+    } finally {
+      setCacheBusyDriveId(null);
+    }
+  }
+
+  async function clearDriveCache(item: DriveListItem) {
+    setCacheBusyDriveId(item.id);
+    setError(null);
+    try {
+      const result = await invoke<ClearDriveCacheResult>("clear_drive_cache", { driveId: item.id });
+      setCacheStatusByDrive((current) => ({ ...current, [item.id]: result.status }));
+      setOutput(result);
+      if (result.warnings.length > 0) {
+        setDiagnosticsOpen(true);
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+      setDiagnosticsOpen(true);
+    } finally {
+      setCacheBusyDriveId(null);
+    }
+  }
+
   async function removeSavedDrive(item: DriveListItem) {
     const confirmed = await confirmDialog(
       `Remove "${item.displayName}" from Fero? This will unmount it if possible and remove its saved connection.`,
@@ -591,6 +649,12 @@ function App() {
     }
   }, [selectedDrive?.id, editingDriveId]);
 
+  useEffect(() => {
+    if (selectedDrive) {
+      void loadCacheStatus(selectedDrive, false);
+    }
+  }, [selectedDrive?.id, selectedDrive?.cacheMode, selectedDrive?.mounted]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Fero navigation">
@@ -663,6 +727,7 @@ function App() {
 
         <div className="sidebar-foot">
           <PathLine icon={FolderOpen} label="Config" value={overview.paths.rcloneConfig} />
+          <PathLine icon={Database} label="Cache" value={overview.paths.rcloneCache} />
           <PathLine icon={Terminal} label="Logs" value={overview.paths.rcloneLog} />
         </div>
       </aside>
@@ -886,6 +951,8 @@ function App() {
                 <MountDetails
                   drive={selectedDrive}
                   busy={busy}
+                  cacheStatus={cacheStatusByDrive[selectedDrive.id] ?? null}
+                  cacheBusy={cacheBusyDriveId === selectedDrive.id}
                   onMount={() => void mountSavedDrive(selectedDrive)}
                   onOpen={() => void openLocalFolder(selectedDrive)}
                   onUnmount={() =>
@@ -896,6 +963,8 @@ function App() {
                   onRemove={() => void removeSavedDrive(selectedDrive)}
                   onAutoMountChange={(autoMount) => void setDriveAutoMount(selectedDrive, autoMount)}
                   onEdit={() => startEditingDrive(selectedDrive)}
+                  onRefreshCache={() => void loadCacheStatus(selectedDrive, true)}
+                  onClearCache={() => void clearDriveCache(selectedDrive)}
                 />
               ) : (
                 <div className="empty-detail">
@@ -1226,21 +1295,29 @@ function EditDriveSettings({
 function MountDetails({
   drive,
   busy,
+  cacheStatus,
+  cacheBusy,
   onMount,
   onOpen,
   onUnmount,
   onRemove,
   onAutoMountChange,
   onEdit,
+  onRefreshCache,
+  onClearCache,
 }: {
   drive: DriveListItem;
   busy: boolean;
+  cacheStatus: DriveCacheStatus | null;
+  cacheBusy: boolean;
   onMount: () => void;
   onOpen: () => void;
   onUnmount: () => void;
   onRemove: () => void;
   onAutoMountChange: (autoMount: boolean) => void;
   onEdit: () => void;
+  onRefreshCache: () => void;
+  onClearCache: () => void;
 }) {
   return (
     <div className="mount-details">
@@ -1251,6 +1328,13 @@ function MountDetails({
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
       {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
+      <CachePanel
+        drive={drive}
+        status={cacheStatus}
+        busy={cacheBusy}
+        onRefresh={onRefreshCache}
+        onClear={onClearCache}
+      />
       {drive.mounted ? (
         <div className="drive-actions">
           <button className="submit-button" type="button" disabled={busy} onClick={onOpen}>
@@ -1299,6 +1383,60 @@ function MountIssuePanel({ drive }: { drive: DriveListItem }) {
       </div>
       {drive.lastIssueRecommendation && <span>{drive.lastIssueRecommendation}</span>}
       {drive.lastCheckedAt && <small>Last checked {formatRelativeTime(drive.lastCheckedAt)}</small>}
+    </div>
+  );
+}
+
+function CachePanel({
+  drive,
+  status,
+  busy,
+  onRefresh,
+  onClear,
+}: {
+  drive: DriveListItem;
+  status: DriveCacheStatus | null;
+  busy: boolean;
+  onRefresh: () => void;
+  onClear: () => void;
+}) {
+  const sizeLabel = status ? formatBytes(status.driveBytes) : "Not scanned";
+  const totalLabel = status ? formatBytes(status.totalBytes) : "Unknown";
+  const fileLabel = status ? `${status.fileCount} cached file${status.fileCount === 1 ? "" : "s"}` : "Scan to inspect files";
+  const root = status?.cacheRoot ?? "Cache path not resolved";
+  const mode = cacheLabelFromString(drive.cacheMode);
+
+  return (
+    <div className="cache-panel">
+      <div className="cache-panel-heading">
+        <div>
+          <Database size={15} />
+          <strong>Cache status</strong>
+        </div>
+        <span>{mode}</span>
+      </div>
+      <div className="cache-metrics">
+        <div>
+          <span>This drive</span>
+          <strong>{busy && !status ? "Scanning..." : sizeLabel}</strong>
+        </div>
+        <div>
+          <span>Fero cache</span>
+          <strong>{totalLabel}</strong>
+        </div>
+      </div>
+      <p>{status?.message ?? "Fero keeps rclone VFS cache in its own cache folder."}</p>
+      <small title={root}>{shortPath(root)} · {fileLabel}</small>
+      <div className="cache-actions">
+        <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
+          {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+          <span>Refresh cache</span>
+        </button>
+        <button className="secondary-button" type="button" disabled={busy || !status || status.driveBytes === 0} onClick={onClear}>
+          <Trash2 size={15} />
+          <span>Clear cache</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -1605,6 +1743,19 @@ function shortPath(value: string) {
   const normalized = value.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts.slice(-2).join("/") || value;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 function formatRelativeTime(timestamp: number) {

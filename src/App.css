@@ -889,6 +889,89 @@ button:disabled {
   color: var(--muted);
 }
 
+.cache-panel {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12181d;
+  padding: 10px 11px;
+}
+
+.cache-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cache-panel-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--accent);
+}
+
+.cache-panel-heading strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cache-panel-heading span,
+.cache-panel small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cache-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cache-metrics div {
+  min-width: 0;
+  border: 1px solid rgba(48, 58, 67, 0.78);
+  border-radius: 7px;
+  background: #10161b;
+  padding: 8px;
+}
+
+.cache-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.cache-metrics strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ink-strong);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cache-panel p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cache-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .detail-line {
   display: grid;
   grid-template-columns: 18px 90px minmax(0, 1fr);

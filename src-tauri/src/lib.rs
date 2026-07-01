@@ -3,7 +3,7 @@ use serde_json::{json, Map, Value};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread::sleep,
@@ -65,6 +65,7 @@ struct AppPaths {
     app_config_dir: String,
     rclone_config: String,
     rclone_log: String,
+    rclone_cache: String,
     drive_catalog: String,
 }
 
@@ -193,6 +194,30 @@ struct MountDriveResult {
     issue: Option<DriveIssue>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveCacheStatus {
+    drive_id: String,
+    cache_mode: String,
+    cache_root: String,
+    drive_cache_paths: Vec<String>,
+    drive_bytes: u64,
+    total_bytes: u64,
+    file_count: u64,
+    mounted: bool,
+    last_scanned_at: u128,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClearDriveCacheResult {
+    status: DriveCacheStatus,
+    removed_bytes: u64,
+    removed_paths: Vec<String>,
+    warnings: Vec<String>,
+}
+
 fn default_auto_mount() -> bool {
     true
 }
@@ -286,6 +311,8 @@ impl RcloneManager {
             password.clone(),
             "--config".to_string(),
             paths.rclone_config.display().to_string(),
+            "--cache-dir".to_string(),
+            paths.rclone_cache.display().to_string(),
             "--log-file".to_string(),
             paths.rclone_log.display().to_string(),
             "--log-format".to_string(),
@@ -566,15 +593,19 @@ fn generate_password() -> String {
 
 fn resolve_pathbufs(app: &AppHandle) -> Result<ResolvedPaths, String> {
     let config_dir = app.path().app_config_dir().map_err(|err| err.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|err| err.to_string())?;
     let log_dir = app.path().app_log_dir().map_err(|err| err.to_string())?;
     let rclone_dir = config_dir.join("rclone");
+    let rclone_cache = cache_dir.join("rclone");
 
     std::fs::create_dir_all(&rclone_dir).map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(&rclone_cache).map_err(|err| err.to_string())?;
     std::fs::create_dir_all(&log_dir).map_err(|err| err.to_string())?;
 
     Ok(ResolvedPaths {
         app_config_dir: config_dir.clone(),
         rclone_config: rclone_dir.join("rclone.conf"),
+        rclone_cache,
         rclone_log: log_dir.join("rclone.jsonl"),
         drive_catalog: config_dir.join("drives.json"),
     })
@@ -585,6 +616,7 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
     Ok(AppPaths {
         app_config_dir: paths.app_config_dir.display().to_string(),
         rclone_config: paths.rclone_config.display().to_string(),
+        rclone_cache: paths.rclone_cache.display().to_string(),
         rclone_log: paths.rclone_log.display().to_string(),
         drive_catalog: paths.drive_catalog.display().to_string(),
     })
@@ -593,6 +625,7 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
 struct ResolvedPaths {
     app_config_dir: PathBuf,
     rclone_config: PathBuf,
+    rclone_cache: PathBuf,
     rclone_log: PathBuf,
     drive_catalog: PathBuf,
 }
@@ -941,6 +974,125 @@ fn mounted_paths_from_value(value: &Value) -> Vec<String> {
                 .map(ToString::to_string)
         })
         .collect()
+}
+
+fn cache_candidate_paths(cache_root: &Path, remote_name: &str) -> Vec<PathBuf> {
+    [
+        cache_root.join("vfs").join(remote_name),
+        cache_root.join("vfsMeta").join(remote_name),
+        cache_root.join(remote_name),
+    ]
+    .into_iter()
+    .collect()
+}
+
+fn directory_size(path: &Path) -> (u64, u64, Vec<String>) {
+    if !path.exists() {
+        return (0, 0, Vec::new());
+    }
+
+    let mut bytes = 0;
+    let mut files = 0;
+    let mut warnings = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.is_file() => {
+                bytes += metadata.len();
+                files += 1;
+            }
+            Ok(metadata) if metadata.is_dir() => match std::fs::read_dir(&current) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(entry) => stack.push(entry.path()),
+                            Err(err) => warnings.push(format!(
+                                "Could not read cache entry in {}: {err}",
+                                current.display()
+                            )),
+                        }
+                    }
+                }
+                Err(err) => warnings.push(format!(
+                    "Could not read cache folder {}: {err}",
+                    current.display()
+                )),
+            },
+            Ok(metadata) => {
+                bytes += metadata.len();
+                files += 1;
+            }
+            Err(err) => warnings.push(format!(
+                "Could not inspect cache path {}: {err}",
+                current.display()
+            )),
+        }
+    }
+
+    (bytes, files, warnings)
+}
+
+fn is_drive_mounted(manager: &RcloneManager, drive: &SavedDrive) -> bool {
+    manager
+        .call_rc("mount/listmounts", json!({}))
+        .map(|value| mounted_paths_from_value(&value))
+        .map(|paths| paths.iter().any(|path| path == &drive.mount_point))
+        .unwrap_or(false)
+}
+
+fn cache_status_for_drive(
+    app: &AppHandle,
+    manager: Option<&RcloneManager>,
+    drive: &SavedDrive,
+) -> Result<(DriveCacheStatus, Vec<String>), String> {
+    let paths = resolve_pathbufs(app)?;
+    let cache_root = paths.rclone_cache;
+    let candidates = cache_candidate_paths(&cache_root, &drive.remote_name);
+    let mut drive_bytes = 0;
+    let mut drive_files = 0;
+    let mut warnings = Vec::new();
+    let mut existing_paths = Vec::new();
+
+    for path in candidates {
+        if path.exists() {
+            let (bytes, files, mut path_warnings) = directory_size(&path);
+            drive_bytes += bytes;
+            drive_files += files;
+            warnings.append(&mut path_warnings);
+            existing_paths.push(path.display().to_string());
+        }
+    }
+
+    let (total_bytes, _, mut total_warnings) = directory_size(&cache_root);
+    warnings.append(&mut total_warnings);
+
+    let mounted = manager
+        .filter(|manager| manager.daemon.is_some())
+        .map(|manager| is_drive_mounted(manager, drive))
+        .unwrap_or(false);
+
+    let message = match drive.cache_mode.as_str() {
+        "off" => "Cache is disabled for this drive.".to_string(),
+        "full" => "Full cache keeps file data locally for faster repeated access.".to_string(),
+        _ => "Smart cache keeps active file data locally while the drive is in use.".to_string(),
+    };
+
+    Ok((
+        DriveCacheStatus {
+            drive_id: drive.id.clone(),
+            cache_mode: drive.cache_mode.clone(),
+            cache_root: cache_root.display().to_string(),
+            drive_cache_paths: existing_paths,
+            drive_bytes,
+            total_bytes,
+            file_count: drive_files,
+            mounted,
+            last_scanned_at: now_millis(),
+            message,
+        },
+        warnings,
+    ))
 }
 
 fn already_mounted_error(message: &str) -> bool {
@@ -1643,6 +1795,69 @@ fn set_drive_auto_mount(
 }
 
 #[tauri::command]
+fn get_cache_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<DriveCacheStatus, String> {
+    let drive = find_saved_drive(&app, &drive_id)?;
+    let manager = lock_manager(&state)?;
+    let (status, _) = cache_status_for_drive(&app, Some(&manager), &drive)?;
+    Ok(status)
+}
+
+#[tauri::command]
+fn clear_drive_cache(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<ClearDriveCacheResult, String> {
+    let drive = find_saved_drive(&app, &drive_id)?;
+    let manager = lock_manager(&state)?;
+    let (before, mut warnings) = cache_status_for_drive(&app, Some(&manager), &drive)?;
+    let mut removed_paths = Vec::new();
+    let mut removed_bytes = 0;
+
+    if before.mounted {
+        warnings.push(
+            "Stop this drive before clearing cached files, then run clear cache again.".to_string(),
+        );
+        return Ok(ClearDriveCacheResult {
+            status: before,
+            removed_bytes,
+            removed_paths,
+            warnings,
+        });
+    }
+
+    let paths = resolve_pathbufs(&app)?;
+    for path in cache_candidate_paths(&paths.rclone_cache, &drive.remote_name) {
+        if !path.exists() {
+            continue;
+        }
+        let (bytes, _, mut path_warnings) = directory_size(&path);
+        warnings.append(&mut path_warnings);
+        match std::fs::remove_dir_all(&path) {
+            Ok(_) => {
+                removed_bytes += bytes;
+                removed_paths.push(path.display().to_string());
+            }
+            Err(err) => warnings.push(format!("Could not remove {}: {err}", path.display())),
+        }
+    }
+
+    let (status, mut status_warnings) = cache_status_for_drive(&app, Some(&manager), &drive)?;
+    warnings.append(&mut status_warnings);
+
+    Ok(ClearDriveCacheResult {
+        status,
+        removed_bytes,
+        removed_paths,
+        warnings,
+    })
+}
+
+#[tauri::command]
 fn remove_saved_drive(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1726,6 +1941,8 @@ pub fn run() {
             mount_saved_drive,
             restore_saved_drives,
             set_drive_auto_mount,
+            get_cache_status,
+            clear_drive_cache,
             remove_saved_drive,
             unmount,
             list_mounts,
