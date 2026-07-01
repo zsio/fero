@@ -88,6 +88,11 @@ type SavedDrive = {
   domain?: string | null;
   share?: string | null;
   webdavVendor?: string | null;
+  lastMountState?: string | null;
+  lastIssueSummary?: string | null;
+  lastIssueRecommendation?: string | null;
+  lastIssueDetails?: string | null;
+  lastCheckedAt?: number | null;
   createdAt: number;
 };
 
@@ -111,6 +116,11 @@ type DriveListItem = {
   domain?: string | null;
   share?: string | null;
   webdavVendor?: string | null;
+  lastMountState?: string | null;
+  lastIssueSummary?: string | null;
+  lastIssueRecommendation?: string | null;
+  lastIssueDetails?: string | null;
+  lastCheckedAt?: number | null;
 };
 
 type RestoreDriveItem = {
@@ -254,6 +264,7 @@ function App() {
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
   const autoRestoreCount = overview.drives.filter((item) => item.autoMount !== false).length;
   const restoreFailures = restoreResult?.items.filter((item) => item.status === "failed").length ?? 0;
+  const attentionCount = overview.drives.filter((item) => Boolean(item.lastIssueSummary)).length;
   const autoRestoreValue = restoring
     ? "Restoring"
     : autoRestoreCount > 0
@@ -686,7 +697,7 @@ function App() {
 
         <section className="status-strip" aria-label="Overview">
           <StatusTile icon={HardDrive} label="Saved drives" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
-          <StatusTile icon={ShieldCheck} label="Protocols" value="4 ready" />
+          <StatusTile icon={AlertTriangle} label="Needs attention" value={String(attentionCount)} tone={attentionCount > 0 ? "warning" : "muted"} />
           <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
           <StatusTile icon={RefreshCw} label="Auto restore" value={autoRestoreValue} tone={autoRestoreCount > 0 ? "good" : "muted"} />
         </section>
@@ -976,7 +987,7 @@ function StatusTile({
   icon: LucideIcon;
   label: string;
   value: string;
-  tone?: "default" | "good" | "muted";
+  tone?: "default" | "good" | "muted" | "warning";
 }) {
   return (
     <div className={`status-tile status-tile-${tone}`}>
@@ -1239,6 +1250,7 @@ function MountDetails({
       <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
+      {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
       {drive.mounted ? (
         <div className="drive-actions">
           <button className="submit-button" type="button" disabled={busy} onClick={onOpen}>
@@ -1254,7 +1266,7 @@ function MountDetails({
         <div className="drive-actions">
           <button className="submit-button" type="button" disabled={busy} onClick={onMount}>
             {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            <span>Mount drive</span>
+            <span>{drive.health === "attention" ? "Retry mount" : "Mount drive"}</span>
           </button>
           <button className="secondary-button" type="button" disabled={busy} onClick={onOpen}>
             <ExternalLink size={15} />
@@ -1274,6 +1286,19 @@ function MountDetails({
         <Trash2 size={15} />
         <span>Remove from Fero</span>
       </button>
+    </div>
+  );
+}
+
+function MountIssuePanel({ drive }: { drive: DriveListItem }) {
+  return (
+    <div className="mount-issue" title={drive.lastIssueDetails ?? undefined}>
+      <div className="mount-issue-heading">
+        <AlertTriangle size={15} />
+        <strong>{drive.lastIssueSummary}</strong>
+      </div>
+      {drive.lastIssueRecommendation && <span>{drive.lastIssueRecommendation}</span>}
+      {drive.lastCheckedAt && <small>Last checked {formatRelativeTime(drive.lastCheckedAt)}</small>}
     </div>
   );
 }
@@ -1439,15 +1464,16 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
   const activeByRemote = new Map(activeMounts.map((mount) => [mount.remote, mount]));
   const savedItems = savedDrives.map((drive) => {
     const active = activeByMountPoint.get(drive.mountPoint) ?? activeByRemote.get(drive.fs);
+    const hasIssue = Boolean(drive.lastIssueSummary);
     return {
       id: drive.id,
       displayName: drive.displayName,
       protocol: drive.protocol,
       remote: drive.fs,
       mountPoint: drive.mountPoint,
-      status: active ? "mounted" : "ready",
+      status: active ? "mounted" : hasIssue ? "attention" : "ready",
       cacheMode: drive.cacheMode,
-      health: active ? "healthy" : "standby",
+      health: active ? "healthy" : hasIssue ? "attention" : "standby",
       mounted: Boolean(active),
       fs: drive.fs,
       autoMount: drive.autoMount !== false,
@@ -1459,6 +1485,11 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       domain: drive.domain,
       share: drive.share,
       webdavVendor: drive.webdavVendor,
+      lastMountState: drive.lastMountState,
+      lastIssueSummary: drive.lastIssueSummary,
+      lastIssueRecommendation: drive.lastIssueRecommendation,
+      lastIssueDetails: drive.lastIssueDetails,
+      lastCheckedAt: drive.lastCheckedAt,
     } satisfies DriveListItem;
   });
 
@@ -1574,6 +1605,17 @@ function shortPath(value: string) {
   const normalized = value.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts.slice(-2).join("/") || value;
+}
+
+function formatRelativeTime(timestamp: number) {
+  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (diffSeconds < 60) return "just now";
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 function focusFirstCreateField() {

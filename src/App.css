@@ -396,6 +396,10 @@ button:disabled {
   color: var(--muted);
 }
 
+.status-tile-warning {
+  color: var(--amber);
+}
+
 .status-tile span {
   display: block;
   color: var(--muted);
@@ -854,6 +858,35 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr);
   gap: 8px;
   margin-top: 12px;
+}
+
+.mount-issue {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(239, 196, 90, 0.36);
+  border-radius: 8px;
+  background: rgba(239, 196, 90, 0.09);
+  padding: 10px 11px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.mount-issue-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--amber);
+}
+
+.mount-issue-heading strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mount-issue small {
+  color: var(--muted);
 }
 
 .detail-line {

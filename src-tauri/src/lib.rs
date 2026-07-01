@@ -176,6 +176,23 @@ struct RestoreDriveItem {
     message: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveIssue {
+    summary: String,
+    recommendation: String,
+    details: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MountDriveResult {
+    drive: SavedDrive,
+    mounted: bool,
+    mount: Option<Value>,
+    issue: Option<DriveIssue>,
+}
+
 fn default_auto_mount() -> bool {
     true
 }
@@ -207,6 +224,16 @@ struct SavedDrive {
     share: Option<String>,
     #[serde(default)]
     webdav_vendor: Option<String>,
+    #[serde(default)]
+    last_mount_state: Option<String>,
+    #[serde(default)]
+    last_issue_summary: Option<String>,
+    #[serde(default)]
+    last_issue_recommendation: Option<String>,
+    #[serde(default)]
+    last_issue_details: Option<String>,
+    #[serde(default)]
+    last_checked_at: Option<u128>,
     created_at: u128,
 }
 
@@ -822,6 +849,33 @@ fn update_drive_auto_mount(
     Ok(updated)
 }
 
+fn update_drive_health(
+    app: &AppHandle,
+    drive_id: &str,
+    state: &str,
+    issue: Option<&DriveIssue>,
+) -> Result<SavedDrive, String> {
+    let mut drives = read_drive_catalog(app)?;
+    let drive = drives
+        .iter_mut()
+        .find(|drive| drive.id == drive_id)
+        .ok_or_else(|| "saved drive was not found".to_string())?;
+    drive.last_mount_state = Some(state.to_string());
+    drive.last_checked_at = Some(now_millis());
+    if let Some(issue) = issue {
+        drive.last_issue_summary = Some(issue.summary.clone());
+        drive.last_issue_recommendation = Some(issue.recommendation.clone());
+        drive.last_issue_details = issue.details.clone();
+    } else {
+        drive.last_issue_summary = None;
+        drive.last_issue_recommendation = None;
+        drive.last_issue_details = None;
+    }
+    let updated = drive.clone();
+    write_drive_catalog(app, &drives)?;
+    Ok(updated)
+}
+
 fn mount_drive(manager: &RcloneManager, drive: &SavedDrive) -> Result<Value, String> {
     manager.call_rc(
         "mount/mount",
@@ -855,6 +909,11 @@ fn apply_request_to_drive(
     drive.domain = optional_text(&request.domain);
     drive.share = optional_text(&request.share);
     drive.webdav_vendor = optional_text(&request.webdav_vendor);
+    drive.last_mount_state = Some("ready".to_string());
+    drive.last_issue_summary = None;
+    drive.last_issue_recommendation = None;
+    drive.last_issue_details = None;
+    drive.last_checked_at = Some(now_millis());
     drive
 }
 
@@ -890,6 +949,65 @@ fn already_mounted_error(message: &str) -> bool {
         || lower.contains("mount point busy")
         || lower.contains("mountpoint busy")
         || lower.contains("already exists")
+}
+
+fn diagnose_mount_error(message: &str) -> DriveIssue {
+    let lower = message.to_ascii_lowercase();
+
+    if lower.contains("winfsp")
+        || lower.contains("macfuse")
+        || lower.contains("osxfuse")
+        || lower.contains("/dev/fuse")
+        || lower.contains("fusermount")
+        || lower.contains("fuse:")
+        || lower.contains("fuse mount")
+        || lower.contains("fuse device")
+        || lower.contains("mount helper")
+    {
+        return DriveIssue {
+            summary: "The system mount component is missing or unavailable.".to_string(),
+            recommendation:
+                "Install or repair WinFsp on Windows, macFUSE on macOS, or FUSE support in Docker/Linux, then try mounting again."
+                    .to_string(),
+            details: Some(message.to_string()),
+        };
+    }
+
+    if lower.contains("directory not empty")
+        || lower.contains("not empty")
+        || lower.contains("mount point busy")
+        || lower.contains("mountpoint busy")
+        || lower.contains("resource busy")
+        || lower.contains("already mounted")
+    {
+        return DriveIssue {
+            summary: "The local mount folder is already in use.".to_string(),
+            recommendation:
+                "Choose an empty local folder, unmount the existing drive using that folder, or restart the mount service before trying again."
+                    .to_string(),
+            details: Some(message.to_string()),
+        };
+    }
+
+    if lower.contains("permission denied")
+        || lower.contains("operation not permitted")
+        || lower.contains("access is denied")
+    {
+        return DriveIssue {
+            summary: "Fero does not have permission to mount at this location.".to_string(),
+            recommendation:
+                "Choose a folder inside your user area, check system privacy permissions, or run the Docker/server mode with the required FUSE permissions."
+                    .to_string(),
+            details: Some(message.to_string()),
+        };
+    }
+
+    let (summary, recommendation) = diagnose_connection_error(message);
+    DriveIssue {
+        summary,
+        recommendation,
+        details: Some(message.to_string()),
+    }
 }
 
 fn diagnose_connection_error(message: &str) -> (String, String) {
@@ -1141,6 +1259,11 @@ fn create_network_drive(
             domain: optional_text(&request.domain),
             share: optional_text(&request.share),
             webdav_vendor: optional_text(&request.webdav_vendor),
+            last_mount_state: Some("mounted".to_string()),
+            last_issue_summary: None,
+            last_issue_recommendation: None,
+            last_issue_details: None,
+            last_checked_at: Some(now_millis()),
             created_at: now_millis(),
         },
     )?;
@@ -1287,7 +1410,7 @@ fn update_saved_drive(
         fs,
         cache_mode,
     );
-    let drive = update_drive(&app, updated)?;
+    let mut drive = update_drive(&app, updated)?;
 
     let mut remounted = false;
     let mut warnings = Vec::new();
@@ -1300,8 +1423,15 @@ fn update_saved_drive(
         }
 
         match mount_drive(&manager, &drive) {
-            Ok(_) => remounted = true,
-            Err(err) => warnings.push(format!("Saved settings, but remount failed: {err}")),
+            Ok(_) => {
+                drive = update_drive_health(&app, &drive.id, "mounted", None)?;
+                remounted = true;
+            }
+            Err(err) => {
+                let issue = diagnose_mount_error(&err);
+                drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+                warnings.push(format!("Saved settings, but remount failed: {err}"));
+            }
         }
     }
 
@@ -1318,18 +1448,61 @@ fn mount_saved_drive(
     app: AppHandle,
     state: State<'_, AppState>,
     drive_id: String,
-) -> Result<Value, String> {
+) -> Result<MountDriveResult, String> {
     let drive = find_saved_drive(&app, &drive_id)?;
-    std::fs::create_dir_all(PathBuf::from(&drive.mount_point)).map_err(|err| {
-        format!(
-            "failed to create local mount folder {}: {err}",
-            drive.mount_point
-        )
-    })?;
+    if let Err(err) = std::fs::create_dir_all(PathBuf::from(&drive.mount_point)) {
+        let issue = DriveIssue {
+            summary: "Fero could not create the local mount folder.".to_string(),
+            recommendation:
+                "Choose a folder you can write to, or create the folder manually and try mounting again."
+                    .to_string(),
+            details: Some(format!(
+                "failed to create local mount folder {}: {err}",
+                drive.mount_point
+            )),
+        };
+        let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+        return Ok(MountDriveResult {
+            drive: updated_drive,
+            mounted: false,
+            mount: None,
+            issue: Some(issue),
+        });
+    }
 
     let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    mount_drive(&manager, &drive)
+    if let Err(err) = manager.ensure_started(&app) {
+        let issue = diagnose_mount_error(&err);
+        let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+        return Ok(MountDriveResult {
+            drive: updated_drive,
+            mounted: false,
+            mount: None,
+            issue: Some(issue),
+        });
+    }
+
+    match mount_drive(&manager, &drive) {
+        Ok(value) => {
+            let updated_drive = update_drive_health(&app, &drive.id, "mounted", None)?;
+            Ok(MountDriveResult {
+                drive: updated_drive,
+                mounted: true,
+                mount: Some(value),
+                issue: None,
+            })
+        }
+        Err(err) => {
+            let issue = diagnose_mount_error(&err);
+            let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+            Ok(MountDriveResult {
+                drive: updated_drive,
+                mounted: false,
+                mount: None,
+                issue: Some(issue),
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -1356,13 +1529,18 @@ fn restore_saved_drives(
 
     let mut manager = lock_manager(&state)?;
     if let Err(err) = manager.ensure_started(&app) {
+        let issue = diagnose_mount_error(&err);
         let items = auto_drives
             .into_iter()
-            .map(|drive| RestoreDriveItem {
-                drive,
-                mounted: false,
-                status: "failed".to_string(),
-                message: Some(err.clone()),
+            .map(|drive| {
+                let drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))
+                    .unwrap_or(drive);
+                RestoreDriveItem {
+                    drive,
+                    mounted: false,
+                    status: "failed".to_string(),
+                    message: Some(err.clone()),
+                }
             })
             .collect();
         return Ok(RestoreDrivesResult {
@@ -1383,6 +1561,7 @@ fn restore_saved_drives(
     for drive in auto_drives {
         if mounted_paths.iter().any(|path| path == &drive.mount_point) {
             mounted += 1;
+            let drive = update_drive_health(&app, &drive.id, "mounted", None).unwrap_or(drive);
             items.push(RestoreDriveItem {
                 drive,
                 mounted: true,
@@ -1393,11 +1572,20 @@ fn restore_saved_drives(
         }
 
         if let Err(err) = std::fs::create_dir_all(PathBuf::from(&drive.mount_point)) {
+            let issue = DriveIssue {
+                summary: "Fero could not create the local mount folder.".to_string(),
+                recommendation:
+                    "Choose a folder you can write to, or create the folder manually and try mounting again."
+                        .to_string(),
+                details: Some(format!("failed to create local mount folder: {err}")),
+            };
+            let drive =
+                update_drive_health(&app, &drive.id, "attention", Some(&issue)).unwrap_or(drive);
             items.push(RestoreDriveItem {
                 drive,
                 mounted: false,
                 status: "failed".to_string(),
-                message: Some(format!("failed to create local mount folder: {err}")),
+                message: issue.details.clone(),
             });
             continue;
         }
@@ -1405,6 +1593,7 @@ fn restore_saved_drives(
         match mount_drive(&manager, &drive) {
             Ok(_) => {
                 mounted += 1;
+                let drive = update_drive_health(&app, &drive.id, "mounted", None).unwrap_or(drive);
                 items.push(RestoreDriveItem {
                     drive,
                     mounted: true,
@@ -1414,6 +1603,7 @@ fn restore_saved_drives(
             }
             Err(err) if already_mounted_error(&err) => {
                 mounted += 1;
+                let drive = update_drive_health(&app, &drive.id, "mounted", None).unwrap_or(drive);
                 items.push(RestoreDriveItem {
                     drive,
                     mounted: true,
@@ -1422,6 +1612,9 @@ fn restore_saved_drives(
                 });
             }
             Err(err) => {
+                let issue = diagnose_mount_error(&err);
+                let drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))
+                    .unwrap_or(drive);
                 items.push(RestoreDriveItem {
                     drive,
                     mounted: false,
