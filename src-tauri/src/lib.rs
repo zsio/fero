@@ -66,6 +66,7 @@ struct AppPaths {
     rclone_config: String,
     rclone_log: String,
     rclone_cache: String,
+    default_mount_root: String,
     drive_catalog: String,
 }
 
@@ -216,6 +217,13 @@ struct ClearDriveCacheResult {
     removed_bytes: u64,
     removed_paths: Vec<String>,
     warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MountPointSuggestion {
+    root: String,
+    path: String,
 }
 
 fn default_auto_mount() -> bool {
@@ -597,6 +605,11 @@ fn resolve_pathbufs(app: &AppHandle) -> Result<ResolvedPaths, String> {
     let log_dir = app.path().app_log_dir().map_err(|err| err.to_string())?;
     let rclone_dir = config_dir.join("rclone");
     let rclone_cache = cache_dir.join("rclone");
+    let default_mount_root = app
+        .path()
+        .home_dir()
+        .map(|home| home.join("Fero Drives"))
+        .unwrap_or_else(|_| config_dir.join("mounts"));
 
     std::fs::create_dir_all(&rclone_dir).map_err(|err| err.to_string())?;
     std::fs::create_dir_all(&rclone_cache).map_err(|err| err.to_string())?;
@@ -606,6 +619,7 @@ fn resolve_pathbufs(app: &AppHandle) -> Result<ResolvedPaths, String> {
         app_config_dir: config_dir.clone(),
         rclone_config: rclone_dir.join("rclone.conf"),
         rclone_cache,
+        default_mount_root,
         rclone_log: log_dir.join("rclone.jsonl"),
         drive_catalog: config_dir.join("drives.json"),
     })
@@ -617,6 +631,7 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
         app_config_dir: paths.app_config_dir.display().to_string(),
         rclone_config: paths.rclone_config.display().to_string(),
         rclone_cache: paths.rclone_cache.display().to_string(),
+        default_mount_root: paths.default_mount_root.display().to_string(),
         rclone_log: paths.rclone_log.display().to_string(),
         drive_catalog: paths.drive_catalog.display().to_string(),
     })
@@ -626,6 +641,7 @@ struct ResolvedPaths {
     app_config_dir: PathBuf,
     rclone_config: PathBuf,
     rclone_cache: PathBuf,
+    default_mount_root: PathBuf,
     rclone_log: PathBuf,
     drive_catalog: PathBuf,
 }
@@ -727,6 +743,67 @@ fn build_remote_name(display_name: &str, protocol: &str) -> String {
         .join("_");
     let slug = if slug.is_empty() { "drive" } else { &slug };
     format!("{protocol}_{slug}_{}", short_nonce())
+}
+
+fn mount_folder_name(display_name: &str) -> String {
+    let mut result = String::new();
+    let mut pending_space = false;
+
+    for character in display_name.trim().chars() {
+        let invalid = character.is_control()
+            || matches!(
+                character,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+            );
+
+        if invalid || character.is_whitespace() {
+            pending_space = !result.is_empty();
+            continue;
+        }
+
+        if pending_space {
+            result.push(' ');
+            pending_space = false;
+        }
+        result.push(character);
+    }
+
+    let cleaned = result.trim_matches([' ', '.']).to_string();
+    if cleaned.is_empty() {
+        "Network Drive".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn suggested_mount_path(
+    app: &AppHandle,
+    display_name: &str,
+    exclude_drive_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    let paths = resolve_pathbufs(app)?;
+    let folder_name = mount_folder_name(display_name);
+    let drives = read_drive_catalog(app)?;
+    let existing_mounts = drives
+        .iter()
+        .filter(|drive| Some(drive.id.as_str()) != exclude_drive_id)
+        .map(|drive| drive.mount_point.as_str())
+        .collect::<Vec<_>>();
+
+    for index in 1..=999 {
+        let name = if index == 1 {
+            folder_name.clone()
+        } else {
+            format!("{folder_name} {index}")
+        };
+        let candidate = paths.default_mount_root.join(name);
+        let candidate_text = candidate.display().to_string();
+        if !existing_mounts.iter().any(|path| *path == candidate_text) {
+            return Ok(candidate);
+        }
+    }
+
+    Err("could not create a unique suggested mount folder".to_string())
 }
 
 fn short_nonce() -> String {
@@ -1352,7 +1429,13 @@ fn create_network_drive(
     request: NetworkDriveRequest,
 ) -> Result<NetworkDriveResult, String> {
     let display_name = required_text(&request.display_name, "Drive name")?;
-    let mount_point = required_text(&request.mount_point, "Local mount folder")?;
+    let mount_point = match optional_text(&Some(request.mount_point.clone())) {
+        Some(path) => path,
+        None => suggested_mount_path(&app, &display_name, None)?
+            .display()
+            .to_string(),
+    };
+    let mount_point = required_text(&mount_point, "Local mount folder")?;
     let (protocol, parameters) = protocol_parameters(&request)?;
     let remote_name = build_remote_name(&display_name, &protocol);
     let fs = build_remote_fs(
@@ -1515,7 +1598,9 @@ fn update_saved_drive(
 ) -> Result<UpdateDriveResult, String> {
     let existing = find_saved_drive(&app, &drive_id)?;
     let display_name = required_text(&request.display_name, "Drive name")?;
-    let mount_point = required_text(&request.mount_point, "Local mount folder")?;
+    let mount_point = optional_text(&Some(request.mount_point.clone()))
+        .unwrap_or_else(|| existing.mount_point.clone());
+    let mount_point = required_text(&mount_point, "Local mount folder")?;
     let requested_protocol = request.protocol.trim().to_ascii_lowercase();
 
     if requested_protocol != existing.protocol {
@@ -1795,6 +1880,20 @@ fn set_drive_auto_mount(
 }
 
 #[tauri::command]
+fn suggest_mount_point(
+    app: AppHandle,
+    display_name: String,
+    drive_id: Option<String>,
+) -> Result<MountPointSuggestion, String> {
+    let paths = resolve_pathbufs(&app)?;
+    let path = suggested_mount_path(&app, &display_name, drive_id.as_deref())?;
+    Ok(MountPointSuggestion {
+        root: paths.default_mount_root.display().to_string(),
+        path: path.display().to_string(),
+    })
+}
+
+#[tauri::command]
 fn get_cache_status(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1941,6 +2040,7 @@ pub fn run() {
             mount_saved_drive,
             restore_saved_drives,
             set_drive_auto_mount,
+            suggest_mount_point,
             get_cache_status,
             clear_drive_cache,
             remove_saved_drive,

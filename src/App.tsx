@@ -54,6 +54,7 @@ type AppOverview = {
     appConfigDir: string;
     rcloneConfig: string;
     rcloneCache: string;
+    defaultMountRoot: string;
     rcloneLog: string;
     driveCatalog: string;
   };
@@ -169,6 +170,11 @@ type ClearDriveCacheResult = {
   warnings: string[];
 };
 
+type MountPointSuggestion = {
+  root: string;
+  path: string;
+};
+
 type DriveForm = {
   protocol: ProtocolId;
   displayName: string;
@@ -251,6 +257,7 @@ const emptyOverview: AppOverview = {
     appConfigDir: "",
     rcloneConfig: "",
     rcloneCache: "",
+    defaultMountRoot: "",
     rcloneLog: "",
     driveCatalog: "",
   },
@@ -283,6 +290,9 @@ function App() {
   const [testingEditConnection, setTestingEditConnection] = useState(false);
   const [cacheStatusByDrive, setCacheStatusByDrive] = useState<Record<string, DriveCacheStatus>>({});
   const [cacheBusyDriveId, setCacheBusyDriveId] = useState<string | null>(null);
+  const [mountPointCustom, setMountPointCustom] = useState(false);
+  const [suggestingMountPoint, setSuggestingMountPoint] = useState(false);
+  const [mountPointSuggestion, setMountPointSuggestion] = useState<MountPointSuggestion | null>(null);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
@@ -386,6 +396,7 @@ function App() {
     );
     if (result) {
       setDrive(makeDefaultForm(drive.protocol));
+      setMountPointCustom(false);
     }
   }
 
@@ -474,6 +485,7 @@ function App() {
       });
       if (typeof selected === "string") {
         setDrive((current) => ({ ...current, mountPoint: selected }));
+        setMountPointCustom(true);
       }
     } catch (err) {
       setError(errorMessage(err));
@@ -575,11 +587,44 @@ function App() {
       return {
         ...next,
         displayName: shouldUseDefaultName || !currentName ? next.displayName : current.displayName,
-        mountPoint: current.mountPoint,
+        mountPoint: mountPointCustom ? current.mountPoint : next.mountPoint,
         username: current.username,
         password: current.password,
       };
     });
+  }
+
+  async function loadMountPointSuggestion(displayName: string, applyToForm: boolean) {
+    const trimmedName = displayName.trim() || selectedProtocol.defaultName;
+    setSuggestingMountPoint(true);
+    try {
+      const suggestion = await invoke<MountPointSuggestion>("suggest_mount_point", {
+        displayName: trimmedName,
+      });
+      setMountPointSuggestion(suggestion);
+      if (applyToForm) {
+        setDrive((current) => ({ ...current, mountPoint: suggestion.path }));
+      }
+      return suggestion;
+    } catch (err) {
+      const rawMessage = rawErrorMessage(err);
+      if (!isTauriBridgeError(rawMessage)) {
+        setError(formatErrorMessage(rawMessage));
+      }
+      const fallback = fallbackMountPointSuggestion(trimmedName, overview.paths.defaultMountRoot);
+      setMountPointSuggestion(fallback);
+      if (applyToForm) {
+        setDrive((current) => ({ ...current, mountPoint: fallback.path }));
+      }
+      return fallback;
+    } finally {
+      setSuggestingMountPoint(false);
+    }
+  }
+
+  async function useRecommendedMountPoint() {
+    setMountPointCustom(false);
+    await loadMountPointSuggestion(drive.displayName, true);
   }
 
   async function bootstrapApp() {
@@ -655,6 +700,12 @@ function App() {
     }
   }, [selectedDrive?.id, selectedDrive?.cacheMode, selectedDrive?.mounted]);
 
+  useEffect(() => {
+    if (!mountPointCustom) {
+      void loadMountPointSuggestion(drive.displayName, true);
+    }
+  }, [drive.displayName, overview.paths.defaultMountRoot, mountPointCustom]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar" aria-label="Fero navigation">
@@ -726,6 +777,7 @@ function App() {
         </section>
 
         <div className="sidebar-foot">
+          <PathLine icon={FolderPlus} label="Mounts" value={overview.paths.defaultMountRoot} />
           <PathLine icon={FolderOpen} label="Config" value={overview.paths.rcloneConfig} />
           <PathLine icon={Database} label="Cache" value={overview.paths.rcloneCache} />
           <PathLine icon={Terminal} label="Logs" value={overview.paths.rcloneLog} />
@@ -806,6 +858,13 @@ function App() {
                   placeholder={selectedProtocol.defaultName}
                 />
 
+                <MountPointRecommendation
+                  suggestion={mountPointSuggestion}
+                  active={!mountPointCustom}
+                  busy={suggestingMountPoint}
+                  onUse={() => void useRecommendedMountPoint()}
+                />
+
                 {drive.protocol === "webdav" ? (
                   <TextInput
                     label="WebDAV address"
@@ -863,26 +922,28 @@ function App() {
                   />
                 </div>
 
-                <div className="form-grid two">
-                  <TextInput
-                    label="Remote folder"
-                    value={drive.remotePath}
-                    onChange={(value) => setDrive((current) => ({ ...current, remotePath: value }))}
-                    placeholder={drive.protocol === "smb" ? "optional subfolder" : "/"}
-                  />
-                  <TextInput
-                    label="Local folder"
-                    value={drive.mountPoint}
-                    onChange={(value) => setDrive((current) => ({ ...current, mountPoint: value }))}
-                    placeholder="Choose folder"
-                    action={
-                      <button className="field-action" type="button" onClick={() => void chooseLocalFolder()}>
-                        <FolderOpen size={14} />
-                        <span>Browse</span>
-                      </button>
-                    }
-                  />
-                </div>
+                <TextInput
+                  label="Remote folder"
+                  value={drive.remotePath}
+                  onChange={(value) => setDrive((current) => ({ ...current, remotePath: value }))}
+                  placeholder={drive.protocol === "smb" ? "optional subfolder" : "/"}
+                />
+
+                <TextInput
+                  label="Local folder"
+                  value={drive.mountPoint}
+                  onChange={(value) => {
+                    setMountPointCustom(true);
+                    setDrive((current) => ({ ...current, mountPoint: value }));
+                  }}
+                  placeholder={mountPointSuggestion?.path ?? "Choose folder"}
+                  action={
+                    <button className="field-action" type="button" onClick={() => void chooseLocalFolder()}>
+                      <FolderOpen size={14} />
+                      <span>Browse</span>
+                    </button>
+                  }
+                />
 
                 <div className="form-grid two">
                   {drive.protocol === "webdav" ? (
@@ -1020,6 +1081,33 @@ function ProtocolHint({ protocol }: { protocol: ProtocolDefinition }) {
     <div className="protocol-hint">
       <KeyRound size={15} />
       <span>{protocol.hint}</span>
+    </div>
+  );
+}
+
+function MountPointRecommendation({
+  suggestion,
+  active,
+  busy,
+  onUse,
+}: {
+  suggestion: MountPointSuggestion | null;
+  active: boolean;
+  busy: boolean;
+  onUse: () => void;
+}) {
+  const path = suggestion?.path ?? "Resolving recommended folder";
+  return (
+    <div className={`mount-recommendation ${active ? "mount-recommendation-active" : ""}`}>
+      <div>
+        <FolderPlus size={15} />
+        <span>Recommended folder</span>
+      </div>
+      <strong title={path}>{shortPath(path)}</strong>
+      <button className="field-action" type="button" disabled={busy} onClick={onUse}>
+        {busy ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+        <span>Use</span>
+      </button>
     </div>
   );
 }
@@ -1543,7 +1631,7 @@ function canTestDriveForm(form: DriveForm) {
 }
 
 function canSaveDriveForm(form: DriveForm) {
-  return Boolean(form.displayName.trim() && form.mountPoint.trim() && canTestDriveForm(form));
+  return Boolean(form.displayName.trim() && canTestDriveForm(form));
 }
 
 function formFromDriveItem(item: DriveListItem): DriveForm {
@@ -1743,6 +1831,29 @@ function shortPath(value: string) {
   const normalized = value.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts.slice(-2).join("/") || value;
+}
+
+function safeFolderName(value: string) {
+  const cleaned = value
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[ .]+|[ .]+$/g, "");
+  return cleaned || "Network Drive";
+}
+
+function joinDisplayPath(root: string, child: string) {
+  if (!root) return `~/Fero Drives/${child}`;
+  const separator = root.includes("\\") && !root.includes("/") ? "\\" : "/";
+  return `${root.replace(/[\\/]+$/, "")}${separator}${child}`;
+}
+
+function fallbackMountPointSuggestion(displayName: string, defaultMountRoot: string): MountPointSuggestion {
+  const root = defaultMountRoot || "~/Fero Drives";
+  return {
+    root,
+    path: joinDisplayPath(root, safeFolderName(displayName)),
+  };
 }
 
 function formatBytes(bytes: number) {
