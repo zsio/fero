@@ -79,6 +79,7 @@ type SavedDrive = {
   mountPoint: string;
   remotePath: string;
   cacheMode: string;
+  autoMount?: boolean;
   createdAt: number;
 };
 
@@ -93,6 +94,21 @@ type DriveListItem = {
   health: "healthy" | "attention" | "standby";
   mounted: boolean;
   fs: string;
+  autoMount: boolean;
+};
+
+type RestoreDriveItem = {
+  drive: SavedDrive;
+  mounted: boolean;
+  status: string;
+  message?: string | null;
+};
+
+type RestoreDrivesResult = {
+  attempted: number;
+  mounted: number;
+  skipped: number;
+  items: RestoreDriveItem[];
 };
 
 type DriveForm = {
@@ -198,9 +214,18 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [drive, setDrive] = useState<DriveForm>(initialDriveForm);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<RestoreDrivesResult | null>(null);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
+  const autoRestoreCount = overview.drives.filter((item) => item.autoMount !== false).length;
+  const restoreFailures = restoreResult?.items.filter((item) => item.status === "failed").length ?? 0;
+  const autoRestoreValue = restoring
+    ? "Restoring"
+    : autoRestoreCount > 0
+      ? `${autoRestoreCount} on launch`
+      : "Manual";
   const driveItems = useMemo(
     () => buildDriveList(overview.drives, activeMounts),
     [overview.drives, activeMounts],
@@ -216,11 +241,11 @@ function App() {
     (drive.protocol === "webdav" ? drive.url.trim() : drive.host.trim()) &&
     (drive.protocol === "smb" ? drive.share.trim() : true);
 
-  function updateActiveMounts(nextMounts: MountSession[]) {
+  function updateActiveMounts(nextMounts: MountSession[], savedDrives = overview.drives) {
     setActiveMounts(nextMounts);
     setSelectedDriveId((current) => {
       if (current) return current;
-      const nextItems = buildDriveList(overview.drives, nextMounts);
+      const nextItems = buildDriveList(savedDrives, nextMounts);
       return nextItems[0]?.id ?? null;
     });
   }
@@ -231,10 +256,10 @@ function App() {
     return nextOverview;
   }
 
-  async function refreshMountsFromDaemon(showOutput = false) {
+  async function refreshMountsFromDaemon(showOutput = false, savedDrives = overview.drives) {
     const result = await invoke<JsonValue>("list_mounts");
     if (showOutput) setOutput(result);
-    updateActiveMounts(extractMounts(result));
+    updateActiveMounts(extractMounts(result), savedDrives);
     return result;
   }
 
@@ -244,9 +269,9 @@ function App() {
     try {
       const nextOverview = await refreshOverview();
       if (nextOverview.daemon.running) {
-        await refreshMountsFromDaemon(showOutput);
+        await refreshMountsFromDaemon(showOutput, nextOverview.drives);
       } else {
-        updateActiveMounts([]);
+        updateActiveMounts([], nextOverview.drives);
         if (showOutput) setOutput({ service: "offline" });
       }
     } catch (err) {
@@ -268,9 +293,9 @@ function App() {
       if (showOutput) setOutput(result);
       const nextOverview = await refreshOverview();
       if (clearMounts || !nextOverview.daemon.running) {
-        updateActiveMounts([]);
+        updateActiveMounts([], nextOverview.drives);
       } else if (refreshMounts) {
-        await refreshMountsFromDaemon(false);
+        await refreshMountsFromDaemon(false, nextOverview.drives);
       }
       return result;
     } catch (err) {
@@ -315,6 +340,17 @@ function App() {
     await runAction(() => invoke("mount_saved_drive", { driveId: item.id }), { refreshMounts: true });
   }
 
+  async function setDriveAutoMount(item: DriveListItem, autoMount: boolean) {
+    await runAction(
+      () =>
+        invoke("set_drive_auto_mount", {
+          driveId: item.id,
+          autoMount,
+        }),
+      { refreshMounts: true },
+    );
+  }
+
   async function removeSavedDrive(item: DriveListItem) {
     const confirmed = await confirmDialog(
       `Remove "${item.displayName}" from Fero? This will unmount it if possible and remove its saved connection.`,
@@ -353,8 +389,35 @@ function App() {
     });
   }
 
+  async function bootstrapApp() {
+    setRestoring(true);
+    setError(null);
+    try {
+      const nextOverview = await refreshOverview();
+      if (nextOverview.drives.some((item) => item.autoMount !== false)) {
+        const result = await invoke<RestoreDrivesResult>("restore_saved_drives");
+        setRestoreResult(result);
+        setOutput(result);
+      }
+
+      const latestOverview = await refreshOverview();
+      if (latestOverview.daemon.running) {
+        await refreshMountsFromDaemon(false, latestOverview.drives);
+      } else {
+        updateActiveMounts([], latestOverview.drives);
+      }
+    } catch (err) {
+      const rawMessage = rawErrorMessage(err);
+      if (!isTauriBridgeError(rawMessage)) {
+        setError(formatErrorMessage(rawMessage));
+      }
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   useEffect(() => {
-    void refreshAll(false);
+    void bootstrapApp();
   }, []);
 
   return (
@@ -387,12 +450,27 @@ function App() {
 
         <section className={`service-card ${daemonRunning ? "service-card-online" : ""}`}>
           <div className="service-state">
-            <StatusDot active={daemonRunning} />
+            <StatusDot active={daemonRunning || restoring} />
             <div>
-              <strong>{daemonRunning ? "Service running" : "Service standby"}</strong>
-              <span>{daemonRunning ? "Ready to mount drives" : "Starts automatically when needed"}</span>
+              <strong>{restoring ? "Restoring drives" : daemonRunning ? "Service running" : "Service standby"}</strong>
+              <span>
+                {restoring
+                  ? "Checking saved drives for launch restore"
+                  : daemonRunning
+                    ? "Ready to mount drives"
+                    : "Starts automatically when needed"}
+              </span>
             </div>
           </div>
+          {(restoring || (restoreResult && restoreResult.attempted > 0)) && (
+            <div className={`restore-note ${restoreFailures > 0 ? "restore-note-warning" : ""}`}>
+              {restoring
+                ? "Restoring saved drives..."
+                : restoreFailures > 0
+                  ? `${restoreFailures} drive${restoreFailures === 1 ? "" : "s"} need attention`
+                  : `${restoreResult?.mounted ?? 0}/${restoreResult?.attempted ?? 0} restored on launch`}
+            </div>
+          )}
           <div className="service-actions">
             <ToolbarButton
               icon={Play}
@@ -448,9 +526,9 @@ function App() {
 
         <section className="status-strip" aria-label="Overview">
           <StatusTile icon={HardDrive} label="Saved drives" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
-          <StatusTile icon={ShieldCheck} label="Protocols" value="WebDAV · FTP · SFTP · SMB" />
+          <StatusTile icon={ShieldCheck} label="Protocols" value="4 ready" />
           <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
-          <StatusTile icon={Database} label="Cache" value={cacheLabel(drive.cacheMode)} />
+          <StatusTile icon={RefreshCw} label="Auto restore" value={autoRestoreValue} tone={autoRestoreCount > 0 ? "good" : "muted"} />
         </section>
 
         <div className="home-grid">
@@ -619,11 +697,12 @@ function App() {
                     })
                   }
                   onRemove={() => void removeSavedDrive(selectedDrive)}
+                  onAutoMountChange={(autoMount) => void setDriveAutoMount(selectedDrive, autoMount)}
                 />
               ) : (
                 <div className="empty-detail">
                   <XCircle size={18} />
-                  <span>Select a mounted drive to see its local folder, protocol and cache status.</span>
+                  <span>Select a drive to see its local folder, protocol and cache status.</span>
                 </div>
               )}
             </section>
@@ -783,6 +862,7 @@ function MountDetails({
   onOpen,
   onUnmount,
   onRemove,
+  onAutoMountChange,
 }: {
   drive: DriveListItem;
   busy: boolean;
@@ -790,6 +870,7 @@ function MountDetails({
   onOpen: () => void;
   onUnmount: () => void;
   onRemove: () => void;
+  onAutoMountChange: (autoMount: boolean) => void;
 }) {
   return (
     <div className="mount-details">
@@ -798,6 +879,7 @@ function MountDetails({
       <DetailLine icon={Cloud} label="Remote" value={drive.remote} />
       <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
+      <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
       {drive.mounted ? (
         <div className="drive-actions">
           <button className="submit-button" type="button" disabled={busy} onClick={onOpen}>
@@ -821,6 +903,10 @@ function MountDetails({
           </button>
         </div>
       )}
+      <button className="secondary-button preference-button" type="button" disabled={busy} onClick={() => onAutoMountChange(!drive.autoMount)}>
+        <RefreshCw size={15} />
+        <span>{drive.autoMount ? "Disable auto mount" : "Restore on launch"}</span>
+      </button>
       <button className="danger-button" type="button" disabled={busy} onClick={onRemove}>
         <Trash2 size={15} />
         <span>Remove from Fero</span>
@@ -957,6 +1043,7 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       health: active ? "healthy" : "standby",
       mounted: Boolean(active),
       fs: drive.fs,
+      autoMount: drive.autoMount !== false,
     } satisfies DriveListItem;
   });
 
@@ -974,6 +1061,7 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       health: mount.health,
       mounted: true,
       fs: mount.remote,
+      autoMount: false,
     }) satisfies DriveListItem);
 
   return [...savedItems, ...orphanMounts];
@@ -1051,12 +1139,6 @@ function stringField(record: Record<string, JsonValue>, keys: string[]) {
     if (typeof value === "string" && value.trim()) return value;
   }
   return null;
-}
-
-function cacheLabel(mode: CacheMode) {
-  if (mode === "full") return "Full cache";
-  if (mode === "off") return "No cache";
-  return "Smart cache";
 }
 
 function cacheLabelFromString(mode: string) {

@@ -205,6 +205,23 @@ button:disabled {
   margin-top: 12px;
 }
 
+.restore-note {
+  margin-top: 12px;
+  border: 1px solid rgba(117, 215, 180, 0.25);
+  border-radius: 7px;
+  background: rgba(117, 215, 180, 0.08);
+  padding: 8px 9px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.restore-note-warning {
+  border-color: rgba(239, 196, 90, 0.36);
+  background: rgba(239, 196, 90, 0.1);
+  color: #f5d991;
+}
+
 .sidebar-foot {
   display: grid;
   gap: 8px;
@@ -789,6 +806,11 @@ button:disabled {
   border-color: var(--line);
   background: #151b20;
   color: var(--muted-strong);
+}
+
+.preference-button {
+  width: 100%;
+  margin-top: 10px;
 }
 
 .diagnostics-section {

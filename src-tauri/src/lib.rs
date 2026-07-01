@@ -136,6 +136,28 @@ struct RemoveDriveResult {
     warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreDrivesResult {
+    attempted: usize,
+    mounted: usize,
+    skipped: usize,
+    items: Vec<RestoreDriveItem>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreDriveItem {
+    drive: SavedDrive,
+    mounted: bool,
+    status: String,
+    message: Option<String>,
+}
+
+fn default_auto_mount() -> bool {
+    true
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedDrive {
@@ -147,6 +169,8 @@ struct SavedDrive {
     mount_point: String,
     remote_path: String,
     cache_mode: String,
+    #[serde(default = "default_auto_mount")]
+    auto_mount: bool,
     created_at: u128,
 }
 
@@ -542,7 +566,9 @@ fn push_param(params: &mut Map<String, Value>, key: &str, value: Option<String>)
     }
 }
 
-fn protocol_parameters(request: &NetworkDriveRequest) -> Result<(String, Map<String, Value>), String> {
+fn protocol_parameters(
+    request: &NetworkDriveRequest,
+) -> Result<(String, Map<String, Value>), String> {
     let protocol = request.protocol.trim().to_ascii_lowercase();
     let mut params = Map::new();
 
@@ -640,7 +666,10 @@ fn build_remote_fs(
 }
 
 fn cache_mode_value(mode: &Option<String>) -> (String, u8) {
-    match optional_text(mode).unwrap_or_else(|| "smart".to_string()).as_str() {
+    match optional_text(mode)
+        .unwrap_or_else(|| "smart".to_string())
+        .as_str()
+    {
         "off" => ("off".to_string(), 0),
         "full" => ("full".to_string(), 3),
         _ => ("smart".to_string(), 2),
@@ -727,6 +756,69 @@ fn find_saved_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, Strin
         .into_iter()
         .find(|drive| drive.id == drive_id)
         .ok_or_else(|| "saved drive was not found".to_string())
+}
+
+fn update_drive_auto_mount(
+    app: &AppHandle,
+    drive_id: &str,
+    auto_mount: bool,
+) -> Result<SavedDrive, String> {
+    let mut drives = read_drive_catalog(app)?;
+    let drive = drives
+        .iter_mut()
+        .find(|drive| drive.id == drive_id)
+        .ok_or_else(|| "saved drive was not found".to_string())?;
+    drive.auto_mount = auto_mount;
+    let updated = drive.clone();
+    write_drive_catalog(app, &drives)?;
+    Ok(updated)
+}
+
+fn mount_drive(manager: &RcloneManager, drive: &SavedDrive) -> Result<Value, String> {
+    manager.call_rc(
+        "mount/mount",
+        json!({
+            "fs": &drive.fs,
+            "mountPoint": &drive.mount_point,
+            "vfsOpt": {
+                "CacheMode": cache_mode_number(&drive.cache_mode),
+            },
+        }),
+    )
+}
+
+fn mounted_paths_from_value(value: &Value) -> Vec<String> {
+    let items = value
+        .get("mounts")
+        .or_else(|| value.get("mountPoints"))
+        .and_then(Value::as_array);
+
+    let Some(items) = items else {
+        return Vec::new();
+    };
+
+    items
+        .iter()
+        .filter_map(|item| {
+            if let Some(path) = item.as_str() {
+                return Some(path.to_string());
+            }
+
+            let object = item.as_object()?;
+            ["mountPoint", "MountPoint", "mount_point", "path", "Path"]
+                .iter()
+                .find_map(|key| object.get(*key).and_then(Value::as_str))
+                .map(ToString::to_string)
+        })
+        .collect()
+}
+
+fn already_mounted_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("already mounted")
+        || lower.contains("mount point busy")
+        || lower.contains("mountpoint busy")
+        || lower.contains("already exists")
 }
 
 #[tauri::command]
@@ -840,9 +932,8 @@ fn create_network_drive(
     )?;
     let (cache_mode, cache_mode_value) = cache_mode_value(&request.cache_mode);
 
-    std::fs::create_dir_all(PathBuf::from(&mount_point)).map_err(|err| {
-        format!("failed to create local mount folder {mount_point}: {err}")
-    })?;
+    std::fs::create_dir_all(PathBuf::from(&mount_point))
+        .map_err(|err| format!("failed to create local mount folder {mount_point}: {err}"))?;
 
     let mut manager = lock_manager(&state)?;
     manager.ensure_started(&app)?;
@@ -881,6 +972,7 @@ fn create_network_drive(
             mount_point: mount_point.clone(),
             remote_path: optional_text(&request.remote_path).unwrap_or_default(),
             cache_mode: cache_mode.clone(),
+            auto_mount: true,
             created_at: now_millis(),
         },
     )?;
@@ -914,16 +1006,124 @@ fn mount_saved_drive(
 
     let mut manager = lock_manager(&state)?;
     manager.ensure_started(&app)?;
-    manager.call_rc(
-        "mount/mount",
-        json!({
-            "fs": drive.fs,
-            "mountPoint": drive.mount_point,
-            "vfsOpt": {
-                "CacheMode": cache_mode_number(&drive.cache_mode),
-            },
-        }),
-    )
+    mount_drive(&manager, &drive)
+}
+
+#[tauri::command]
+fn restore_saved_drives(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RestoreDrivesResult, String> {
+    let drives = read_drive_catalog(&app)?;
+    let skipped = drives.iter().filter(|drive| !drive.auto_mount).count();
+    let auto_drives = drives
+        .into_iter()
+        .filter(|drive| drive.auto_mount)
+        .collect::<Vec<_>>();
+    let attempted = auto_drives.len();
+
+    if auto_drives.is_empty() {
+        return Ok(RestoreDrivesResult {
+            attempted,
+            mounted: 0,
+            skipped,
+            items: Vec::new(),
+        });
+    }
+
+    let mut manager = lock_manager(&state)?;
+    if let Err(err) = manager.ensure_started(&app) {
+        let items = auto_drives
+            .into_iter()
+            .map(|drive| RestoreDriveItem {
+                drive,
+                mounted: false,
+                status: "failed".to_string(),
+                message: Some(err.clone()),
+            })
+            .collect();
+        return Ok(RestoreDrivesResult {
+            attempted,
+            mounted: 0,
+            skipped,
+            items,
+        });
+    }
+
+    let mounted_paths = manager
+        .call_rc("mount/listmounts", json!({}))
+        .map(|value| mounted_paths_from_value(&value))
+        .unwrap_or_default();
+    let mut mounted = 0;
+    let mut items = Vec::with_capacity(auto_drives.len());
+
+    for drive in auto_drives {
+        if mounted_paths.iter().any(|path| path == &drive.mount_point) {
+            mounted += 1;
+            items.push(RestoreDriveItem {
+                drive,
+                mounted: true,
+                status: "alreadyMounted".to_string(),
+                message: None,
+            });
+            continue;
+        }
+
+        if let Err(err) = std::fs::create_dir_all(PathBuf::from(&drive.mount_point)) {
+            items.push(RestoreDriveItem {
+                drive,
+                mounted: false,
+                status: "failed".to_string(),
+                message: Some(format!("failed to create local mount folder: {err}")),
+            });
+            continue;
+        }
+
+        match mount_drive(&manager, &drive) {
+            Ok(_) => {
+                mounted += 1;
+                items.push(RestoreDriveItem {
+                    drive,
+                    mounted: true,
+                    status: "mounted".to_string(),
+                    message: None,
+                });
+            }
+            Err(err) if already_mounted_error(&err) => {
+                mounted += 1;
+                items.push(RestoreDriveItem {
+                    drive,
+                    mounted: true,
+                    status: "alreadyMounted".to_string(),
+                    message: Some(err),
+                });
+            }
+            Err(err) => {
+                items.push(RestoreDriveItem {
+                    drive,
+                    mounted: false,
+                    status: "failed".to_string(),
+                    message: Some(err),
+                });
+            }
+        }
+    }
+
+    Ok(RestoreDrivesResult {
+        attempted,
+        mounted,
+        skipped,
+        items,
+    })
+}
+
+#[tauri::command]
+fn set_drive_auto_mount(
+    app: AppHandle,
+    drive_id: String,
+    auto_mount: bool,
+) -> Result<SavedDrive, String> {
+    update_drive_auto_mount(&app, &drive_id, auto_mount)
 }
 
 #[tauri::command]
@@ -1006,6 +1206,8 @@ pub fn run() {
             start_mount,
             create_network_drive,
             mount_saved_drive,
+            restore_saved_drives,
+            set_drive_auto_mount,
             remove_saved_drive,
             unmount,
             list_mounts,
