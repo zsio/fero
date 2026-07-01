@@ -1,66 +1,75 @@
 # Fero
 
-Fero is a Wails v3 desktop client for rclone with a React + Vite frontend, Tailwind CSS styling, and shadcn-style component primitives.
+Fero is a Tauri v2 desktop control plane for rclone.
+
+## Stack
+
+- Desktop shell: Tauri v2
+- Backend: Rust commands owned by the app
+- Frontend: Vite + React + TypeScript + Tailwind CSS
+- rclone integration: official rclone binary as a sidecar / external binary
 
 ## Architecture
 
-- **GUI:** Wails v3 + React + Vite
-- **Frontend styling:** Tailwind CSS + custom desktop-first design system + shadcn-style UI primitives
-- **rclone integration:** upstream `rclone` binary only; no source patching or vendoring
-- **Binary strategy:** prefer a configured custom path, then bundled binaries under `resources/rclone/<os-arch>/`, then system `rclone`
-- **Transfer/mount execution:** managed child processes launched by Go
-- **Remote/provider management:** CLI-backed `rclone config *` workflows
+```text
+React UI
+  -> Tauri invoke commands
+  -> Rust RcloneManager
+  -> rclone rcd sidecar
+  -> rclone RC API
+```
 
-## Why binary embedding instead of vendoring rclone source?
+The frontend does not execute shell commands directly. Rust owns the rclone
+process lifecycle, RC credentials, app-scoped `rclone.conf`, logs, shutdown, and
+fallback cleanup.
 
-Fero treats rclone as an immutable upstream dependency so upgrades stay cheap and predictable. That keeps the maintenance surface close to official rclone releases and avoids carrying a fork.
+## Sidecar binaries
 
-## Current pinned rclone version
+Tauri is configured with:
 
-- `v1.73.3`
+```json
+"externalBin": ["bin/rclone"]
+```
 
-Place platform binaries here when packaging:
+Install the pinned rclone binaries into `src-tauri/bin`:
 
-- `resources/rclone/darwin-arm64/rclone`
-- `resources/rclone/darwin-amd64/rclone`
-- `resources/rclone/linux-amd64/rclone`
-- `resources/rclone/windows-amd64/rclone.exe`
+```bash
+./scripts/fetch-rclone-sidecar.sh
+```
+
+For local development before the sidecar is installed, Fero can also use:
+
+```bash
+FERO_RCLONE_BIN=/opt/homebrew/bin/rclone pnpm tauri dev
+```
+
+or a system `rclone` on `PATH`.
 
 ## Development
 
 ```bash
-# install frontend deps
-cd frontend && pnpm install
-
-# run the desktop app in dev mode
-cd .. && wails3 dev
+pnpm install
+pnpm tauri dev
 ```
 
-## Validation commands
+## Validation
 
 ```bash
-# frontend typecheck + build
-cd frontend && pnpm run typecheck && pnpm run build
-
-# backend tests
-cd .. && go test ./...
-
-# desktop build
-wails3 build
+pnpm build
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-## Implemented surfaces
+## Current scope
 
-- environment + binary resolution overview
-- provider catalog discovery
-- remote create / update / delete
-- transfer queue management
-- mount session management
-- app settings persistence
-- desktop-oriented dashboard UI
+- Starts and stops an app-owned `rclone rcd`
+- Uses local RC auth on a random loopback port
+- Stores app-owned rclone config and JSON logs
+- Exposes remotes/providers discovery
+- Exposes async transfer launch
+- Exposes mount/list/unmount commands
 
-## Notes
+Mount behavior still depends on system prerequisites:
 
-- Windows drive-letter mounts usually require **WinFsp**.
-- macOS mounts typically require **macFUSE**.
-- Linux mounts require working **FUSE** support and permissions.
+- macOS: macFUSE
+- Windows: WinFsp
+- Linux: FUSE support and user permissions
