@@ -59,7 +59,17 @@ type AppOverview = {
     driveCatalog: string;
   };
   daemon: DaemonStatus;
+  mountEnvironment: MountEnvironment;
   drives: SavedDrive[];
+};
+
+type MountEnvironment = {
+  platform: string;
+  requirement: string;
+  state: "ready" | "needsSetup" | "limited" | "unknown" | string;
+  summary: string;
+  recommendation: string;
+  detectedPaths: string[];
 };
 
 type MountSession = {
@@ -266,6 +276,14 @@ const emptyOverview: AppOverview = {
     configPath: "",
     logPath: "",
   },
+  mountEnvironment: {
+    platform: "Desktop",
+    requirement: "Mount support",
+    state: "unknown",
+    summary: "Mount support is not checked.",
+    recommendation: "Open Fero as a desktop app to verify local mount support.",
+    detectedPaths: [],
+  },
   drives: [],
 };
 
@@ -299,6 +317,8 @@ function App() {
   const autoRestoreCount = overview.drives.filter((item) => item.autoMount !== false).length;
   const restoreFailures = restoreResult?.items.filter((item) => item.status === "failed").length ?? 0;
   const attentionCount = overview.drives.filter((item) => Boolean(item.lastIssueSummary)).length;
+  const mountEnvironmentTone = environmentTone(overview.mountEnvironment.state);
+  const mountEnvironmentValue = environmentValue(overview.mountEnvironment.state);
   const autoRestoreValue = restoring
     ? "Restoring"
     : autoRestoreCount > 0
@@ -815,6 +835,7 @@ function App() {
         <section className="status-strip" aria-label="Overview">
           <StatusTile icon={HardDrive} label="Saved drives" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
           <StatusTile icon={AlertTriangle} label="Needs attention" value={String(attentionCount)} tone={attentionCount > 0 ? "warning" : "muted"} />
+          <StatusTile icon={ShieldCheck} label="Mount system" value={mountEnvironmentValue} tone={mountEnvironmentTone} />
           <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
           <StatusTile icon={RefreshCw} label="Auto restore" value={autoRestoreValue} tone={autoRestoreCount > 0 ? "good" : "muted"} />
         </section>
@@ -842,6 +863,7 @@ function App() {
             <section className="pane-section create-pane">
               <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
+              <MountEnvironmentPanel environment={overview.mountEnvironment} />
 
               <form
                 className="drive-form"
@@ -1108,6 +1130,31 @@ function MountPointRecommendation({
         {busy ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
         <span>Use</span>
       </button>
+    </div>
+  );
+}
+
+function MountEnvironmentPanel({ environment }: { environment: MountEnvironment }) {
+  const ready = environment.state === "ready";
+  const warning = environment.state === "needsSetup" || environment.state === "limited";
+  const Icon = ready ? ShieldCheck : warning ? AlertTriangle : Settings;
+  const pathLabel =
+    environment.detectedPaths.length > 0
+      ? shortPath(environment.detectedPaths[0])
+      : environment.requirement;
+
+  return (
+    <div className={`mount-environment mount-environment-${environmentTone(environment.state)}`}>
+      <div className="mount-environment-icon">
+        <Icon size={16} />
+      </div>
+      <div>
+        <strong>{environment.summary}</strong>
+        <span>{environment.recommendation}</span>
+      </div>
+      <small title={environment.detectedPaths.join("\n") || environment.requirement}>
+        {environment.platform} · {pathLabel}
+      </small>
     </div>
   );
 }
@@ -1819,6 +1866,19 @@ function cacheLabelFromString(mode: string) {
   if (mode === "off") return "No cache";
   if (mode === "smart") return "Smart cache";
   return mode || "Smart cache";
+}
+
+function environmentValue(state: string) {
+  if (state === "ready") return "Ready";
+  if (state === "needsSetup") return "Needs setup";
+  if (state === "limited") return "Limited";
+  return "Unknown";
+}
+
+function environmentTone(state: string): "good" | "warning" | "muted" {
+  if (state === "ready") return "good";
+  if (state === "needsSetup" || state === "limited") return "warning";
+  return "muted";
 }
 
 function protocolLabel(protocol: string) {

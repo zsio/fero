@@ -56,6 +56,7 @@ struct AppOverview {
     app_version: String,
     paths: AppPaths,
     daemon: DaemonStatus,
+    mount_environment: MountEnvironment,
     drives: Vec<SavedDrive>,
 }
 
@@ -80,6 +81,17 @@ struct DaemonStatus {
     log_path: String,
     version: Option<Value>,
     last_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MountEnvironment {
+    platform: String,
+    requirement: String,
+    state: String,
+    summary: String,
+    recommendation: String,
+    detected_paths: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -635,6 +647,111 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
         rclone_log: paths.rclone_log.display().to_string(),
         drive_catalog: paths.drive_catalog.display().to_string(),
     })
+}
+
+fn existing_paths(paths: &[&str]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| Path::new(path).exists())
+        .map(|path| path.to_string())
+        .collect()
+}
+
+fn inspect_mount_environment() -> MountEnvironment {
+    if cfg!(target_os = "macos") {
+        let detected_paths = existing_paths(&[
+            "/Library/Filesystems/macfuse.fs",
+            "/Library/Filesystems/osxfuse.fs",
+            "/Library/PreferencePanes/macFUSE.prefPane",
+            "/usr/local/bin/mount_macfuse",
+        ]);
+        if detected_paths.is_empty() {
+            return MountEnvironment {
+                platform: "macOS".to_string(),
+                requirement: "macFUSE".to_string(),
+                state: "needsSetup".to_string(),
+                summary: "macFUSE is not detected.".to_string(),
+                recommendation:
+                    "Install macFUSE before mounting network drives, then restart Fero.".to_string(),
+                detected_paths,
+            };
+        }
+
+        return MountEnvironment {
+            platform: "macOS".to_string(),
+            requirement: "macFUSE".to_string(),
+            state: "ready".to_string(),
+            summary: "macFUSE is available.".to_string(),
+            recommendation:
+                "Fero can mount drives on this Mac. Keep macFUSE approved in System Settings."
+                    .to_string(),
+            detected_paths,
+        };
+    }
+
+    if cfg!(target_os = "windows") {
+        let detected_paths = existing_paths(&[
+            r"C:\Program Files (x86)\WinFsp\bin\winfsp-x64.dll",
+            r"C:\Program Files\WinFsp\bin\winfsp-x64.dll",
+            r"C:\Program Files (x86)\WinFsp\bin\launchctl-x64.exe",
+            r"C:\Program Files\WinFsp\bin\launchctl-x64.exe",
+        ]);
+        if detected_paths.is_empty() {
+            return MountEnvironment {
+                platform: "Windows".to_string(),
+                requirement: "WinFsp".to_string(),
+                state: "needsSetup".to_string(),
+                summary: "WinFsp is not detected.".to_string(),
+                recommendation: "Install WinFsp before mounting network drives, then restart Fero."
+                    .to_string(),
+                detected_paths,
+            };
+        }
+
+        return MountEnvironment {
+            platform: "Windows".to_string(),
+            requirement: "WinFsp".to_string(),
+            state: "ready".to_string(),
+            summary: "WinFsp is available.".to_string(),
+            recommendation: "Fero can mount drives on this Windows machine.".to_string(),
+            detected_paths,
+        };
+    }
+
+    if cfg!(target_os = "linux") {
+        let detected_paths = existing_paths(&["/dev/fuse"]);
+        if detected_paths.is_empty() {
+            return MountEnvironment {
+                platform: "Linux / Docker".to_string(),
+                requirement: "FUSE device".to_string(),
+                state: "limited".to_string(),
+                summary: "FUSE is not available to this process.".to_string(),
+                recommendation:
+                    "For Docker/server mode, expose /dev/fuse and the required mount capabilities."
+                        .to_string(),
+                detected_paths,
+            };
+        }
+
+        return MountEnvironment {
+            platform: "Linux / Docker".to_string(),
+            requirement: "FUSE device".to_string(),
+            state: "ready".to_string(),
+            summary: "FUSE is available.".to_string(),
+            recommendation: "Fero can request mounts in this environment.".to_string(),
+            detected_paths,
+        };
+    }
+
+    MountEnvironment {
+        platform: std::env::consts::OS.to_string(),
+        requirement: "Mount support".to_string(),
+        state: "unknown".to_string(),
+        summary: "Mount support is not verified on this platform.".to_string(),
+        recommendation: "Use macOS, Windows, or Docker/server mode for the first release."
+            .to_string(),
+        detected_paths: Vec::new(),
+    }
 }
 
 struct ResolvedPaths {
@@ -1337,6 +1454,7 @@ fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOvervie
         product_name: "Fero".to_string(),
         app_version: app.package_info().version.to_string(),
         daemon: manager.status(&paths),
+        mount_environment: inspect_mount_environment(),
         drives: read_drive_catalog(&app)?,
         paths,
     })

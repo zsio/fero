@@ -369,7 +369,7 @@ button:disabled {
 .status-strip {
   display: grid;
   flex: none;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   padding: 12px 0;
 }
@@ -664,6 +664,81 @@ button:disabled {
   border-color: rgba(117, 215, 180, 0.62);
   background: rgba(117, 215, 180, 0.11);
   color: var(--accent);
+}
+
+.mount-environment {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12181d;
+  padding: 9px 10px;
+}
+
+.mount-environment-good {
+  border-color: rgba(117, 215, 180, 0.34);
+  background: rgba(117, 215, 180, 0.07);
+}
+
+.mount-environment-warning {
+  border-color: rgba(239, 196, 90, 0.38);
+  background: rgba(239, 196, 90, 0.08);
+}
+
+.mount-environment-muted {
+  border-color: rgba(142, 154, 166, 0.28);
+}
+
+.mount-environment-icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgba(117, 215, 180, 0.25);
+  border-radius: 7px;
+  color: var(--accent);
+}
+
+.mount-environment-warning .mount-environment-icon {
+  border-color: rgba(239, 196, 90, 0.32);
+  color: var(--amber);
+}
+
+.mount-environment > div:not(.mount-environment-icon) {
+  min-width: 0;
+}
+
+.mount-environment strong {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-strong);
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mount-environment span {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mount-environment small {
+  overflow: hidden;
+  max-width: 112px;
+  color: var(--muted-strong);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drive-form {
