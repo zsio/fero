@@ -560,6 +560,11 @@ button:disabled {
   color: var(--danger);
 }
 
+.health-pill-standby {
+  border-color: rgba(142, 154, 166, 0.34);
+  color: var(--muted-strong);
+}
+
 .empty-mounts,
 .empty-detail {
   display: grid;
@@ -658,7 +663,7 @@ button:disabled {
   min-width: 0;
 }
 
-.field span {
+.field label {
   color: var(--muted);
   font-size: 12px;
 }
@@ -677,6 +682,33 @@ button:disabled {
   transition:
     border-color 150ms ease,
     background 150ms ease;
+}
+
+.input-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.field-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 84px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-raised);
+  color: var(--ink);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.field-action:hover {
+  border-color: var(--line-strong);
+  background: #2a333b;
 }
 
 .field input:focus,
@@ -741,6 +773,10 @@ button:disabled {
   border-color: rgba(255, 131, 124, 0.45);
   background: var(--danger-soft);
   color: #ffd3d0;
+}
+
+.mount-details .submit-button {
+  margin-top: 12px;
 }
 
 .diagnostics-section {

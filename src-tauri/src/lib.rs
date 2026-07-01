@@ -56,6 +56,7 @@ struct AppOverview {
     app_version: String,
     paths: AppPaths,
     daemon: DaemonStatus,
+    drives: Vec<SavedDrive>,
 }
 
 #[derive(Clone, Serialize)]
@@ -64,6 +65,7 @@ struct AppPaths {
     app_config_dir: String,
     rclone_config: String,
     rclone_log: String,
+    drive_catalog: String,
 }
 
 #[derive(Serialize)]
@@ -120,8 +122,23 @@ struct NetworkDriveResult {
     fs: String,
     mount_point: String,
     cache_mode: String,
+    drive: SavedDrive,
     remote: Value,
     mount: Value,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedDrive {
+    id: String,
+    display_name: String,
+    protocol: String,
+    remote_name: String,
+    fs: String,
+    mount_point: String,
+    remote_path: String,
+    cache_mode: String,
+    created_at: u128,
 }
 
 impl RcloneManager {
@@ -460,9 +477,10 @@ fn resolve_pathbufs(app: &AppHandle) -> Result<ResolvedPaths, String> {
     std::fs::create_dir_all(&log_dir).map_err(|err| err.to_string())?;
 
     Ok(ResolvedPaths {
-        app_config_dir: config_dir,
+        app_config_dir: config_dir.clone(),
         rclone_config: rclone_dir.join("rclone.conf"),
         rclone_log: log_dir.join("rclone.jsonl"),
+        drive_catalog: config_dir.join("drives.json"),
     })
 }
 
@@ -472,6 +490,7 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
         app_config_dir: paths.app_config_dir.display().to_string(),
         rclone_config: paths.rclone_config.display().to_string(),
         rclone_log: paths.rclone_log.display().to_string(),
+        drive_catalog: paths.drive_catalog.display().to_string(),
     })
 }
 
@@ -479,6 +498,7 @@ struct ResolvedPaths {
     app_config_dir: PathBuf,
     rclone_config: PathBuf,
     rclone_log: PathBuf,
+    drive_catalog: PathBuf,
 }
 
 fn lock_manager<'a>(
@@ -618,6 +638,77 @@ fn cache_mode_value(mode: &Option<String>) -> (String, u8) {
     }
 }
 
+fn cache_mode_number(mode: &str) -> u8 {
+    match mode {
+        "off" => 0,
+        "full" => 3,
+        _ => 2,
+    }
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn read_drive_catalog(app: &AppHandle) -> Result<Vec<SavedDrive>, String> {
+    let paths = resolve_pathbufs(app)?;
+    if !paths.drive_catalog.exists() {
+        return Ok(Vec::new());
+    }
+
+    let text = std::fs::read_to_string(&paths.drive_catalog).map_err(|err| {
+        format!(
+            "failed to read drive catalog {}: {err}",
+            paths.drive_catalog.display()
+        )
+    })?;
+    if text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "failed to parse drive catalog {}: {err}",
+            paths.drive_catalog.display()
+        )
+    })
+}
+
+fn write_drive_catalog(app: &AppHandle, drives: &[SavedDrive]) -> Result<(), String> {
+    let paths = resolve_pathbufs(app)?;
+    let text = serde_json::to_string_pretty(drives)
+        .map_err(|err| format!("failed to serialize drive catalog: {err}"))?;
+    std::fs::write(&paths.drive_catalog, text).map_err(|err| {
+        format!(
+            "failed to write drive catalog {}: {err}",
+            paths.drive_catalog.display()
+        )
+    })
+}
+
+fn save_drive(app: &AppHandle, drive: SavedDrive) -> Result<SavedDrive, String> {
+    let mut drives = read_drive_catalog(app)?;
+    drives.retain(|item| {
+        item.id != drive.id
+            && item.remote_name != drive.remote_name
+            && item.mount_point != drive.mount_point
+    });
+    drives.push(drive.clone());
+    drives.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    write_drive_catalog(app, &drives)?;
+    Ok(drive)
+}
+
+fn find_saved_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, String> {
+    read_drive_catalog(app)?
+        .into_iter()
+        .find(|drive| drive.id == drive_id)
+        .ok_or_else(|| "saved drive was not found".to_string())
+}
+
 #[tauri::command]
 fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOverview, String> {
     let paths = resolve_paths(&app)?;
@@ -626,6 +717,7 @@ fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOvervie
         product_name: "Fero".to_string(),
         app_version: app.package_info().version.to_string(),
         daemon: manager.status(&paths),
+        drives: read_drive_catalog(&app)?,
         paths,
     })
 }
@@ -758,6 +850,21 @@ fn create_network_drive(
         }),
     )?;
 
+    let drive = save_drive(
+        &app,
+        SavedDrive {
+            id: remote_name.clone(),
+            display_name: display_name.clone(),
+            protocol: protocol.clone(),
+            remote_name: remote_name.clone(),
+            fs: fs.clone(),
+            mount_point: mount_point.clone(),
+            remote_path: optional_text(&request.remote_path).unwrap_or_default(),
+            cache_mode: cache_mode.clone(),
+            created_at: now_millis(),
+        },
+    )?;
+
     Ok(NetworkDriveResult {
         protocol,
         display_name,
@@ -765,9 +872,38 @@ fn create_network_drive(
         fs,
         mount_point,
         cache_mode,
+        drive,
         remote,
         mount,
     })
+}
+
+#[tauri::command]
+fn mount_saved_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<Value, String> {
+    let drive = find_saved_drive(&app, &drive_id)?;
+    std::fs::create_dir_all(PathBuf::from(&drive.mount_point)).map_err(|err| {
+        format!(
+            "failed to create local mount folder {}: {err}",
+            drive.mount_point
+        )
+    })?;
+
+    let mut manager = lock_manager(&state)?;
+    manager.ensure_started(&app)?;
+    manager.call_rc(
+        "mount/mount",
+        json!({
+            "fs": drive.fs,
+            "mountPoint": drive.mount_point,
+            "vfsOpt": {
+                "CacheMode": cache_mode_number(&drive.cache_mode),
+            },
+        }),
+    )
 }
 
 #[tauri::command]
@@ -798,6 +934,7 @@ fn job_status(app: AppHandle, state: State<'_, AppState>, job_id: u64) -> Result
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::default())
@@ -811,6 +948,7 @@ pub fn run() {
             start_transfer,
             start_mount,
             create_network_drive,
+            mount_saved_drive,
             unmount,
             list_mounts,
             job_status

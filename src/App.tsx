@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Activity,
   AlertTriangle,
@@ -49,8 +50,10 @@ type AppOverview = {
     appConfigDir: string;
     rcloneConfig: string;
     rcloneLog: string;
+    driveCatalog: string;
   };
   daemon: DaemonStatus;
+  drives: SavedDrive[];
 };
 
 type MountSession = {
@@ -62,6 +65,31 @@ type MountSession = {
   protocol: string;
   health: "healthy" | "attention";
   raw?: JsonValue;
+};
+
+type SavedDrive = {
+  id: string;
+  displayName: string;
+  protocol: ProtocolId | string;
+  remoteName: string;
+  fs: string;
+  mountPoint: string;
+  remotePath: string;
+  cacheMode: string;
+  createdAt: number;
+};
+
+type DriveListItem = {
+  id: string;
+  displayName: string;
+  protocol: string;
+  remote: string;
+  mountPoint: string;
+  status: string;
+  cacheMode: string;
+  health: "healthy" | "attention" | "standby";
+  mounted: boolean;
+  fs: string;
 };
 
 type DriveForm = {
@@ -146,20 +174,22 @@ const emptyOverview: AppOverview = {
     appConfigDir: "",
     rcloneConfig: "",
     rcloneLog: "",
+    driveCatalog: "",
   },
   daemon: {
     running: false,
     configPath: "",
     logPath: "",
   },
+  drives: [],
 };
 
 const initialDriveForm = makeDefaultForm("webdav");
 
 function App() {
   const [overview, setOverview] = useState<AppOverview>(emptyOverview);
-  const [mounts, setMounts] = useState<MountSession[]>([]);
-  const [selectedMountId, setSelectedMountId] = useState<string | null>(null);
+  const [activeMounts, setActiveMounts] = useState<MountSession[]>([]);
+  const [selectedDriveId, setSelectedDriveId] = useState<string | null>(null);
   const [output, setOutput] = useState<JsonValue>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -168,9 +198,13 @@ function App() {
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
-  const selectedMount = useMemo(
-    () => mounts.find((item) => item.id === selectedMountId) ?? mounts[0] ?? null,
-    [mounts, selectedMountId],
+  const driveItems = useMemo(
+    () => buildDriveList(overview.drives, activeMounts),
+    [overview.drives, activeMounts],
+  );
+  const selectedDrive = useMemo(
+    () => driveItems.find((item) => item.id === selectedDriveId) ?? driveItems[0] ?? null,
+    [driveItems, selectedDriveId],
   );
 
   const canCreateDrive =
@@ -179,12 +213,12 @@ function App() {
     (drive.protocol === "webdav" ? drive.url.trim() : drive.host.trim()) &&
     (drive.protocol === "smb" ? drive.share.trim() : true);
 
-  function updateMountSelection(nextMounts: MountSession[]) {
-    setMounts(nextMounts);
-    setSelectedMountId((current) => {
-      if (nextMounts.length === 0) return null;
-      if (current && nextMounts.some((item) => item.id === current)) return current;
-      return nextMounts[0].id;
+  function updateActiveMounts(nextMounts: MountSession[]) {
+    setActiveMounts(nextMounts);
+    setSelectedDriveId((current) => {
+      if (current) return current;
+      const nextItems = buildDriveList(overview.drives, nextMounts);
+      return nextItems[0]?.id ?? null;
     });
   }
 
@@ -197,7 +231,7 @@ function App() {
   async function refreshMountsFromDaemon(showOutput = false) {
     const result = await invoke<JsonValue>("list_mounts");
     if (showOutput) setOutput(result);
-    updateMountSelection(extractMounts(result));
+    updateActiveMounts(extractMounts(result));
     return result;
   }
 
@@ -209,7 +243,7 @@ function App() {
       if (nextOverview.daemon.running) {
         await refreshMountsFromDaemon(showOutput);
       } else {
-        updateMountSelection([]);
+        updateActiveMounts([]);
         if (showOutput) setOutput({ service: "offline" });
       }
     } catch (err) {
@@ -231,7 +265,7 @@ function App() {
       if (showOutput) setOutput(result);
       const nextOverview = await refreshOverview();
       if (clearMounts || !nextOverview.daemon.running) {
-        updateMountSelection([]);
+        updateActiveMounts([]);
       } else if (refreshMounts) {
         await refreshMountsFromDaemon(false);
       }
@@ -257,6 +291,25 @@ function App() {
     if (result) {
       setDrive(makeDefaultForm(drive.protocol));
     }
+  }
+
+  async function chooseLocalFolder() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Choose a local folder for this network drive",
+      });
+      if (typeof selected === "string") {
+        setDrive((current) => ({ ...current, mountPoint: selected }));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function mountSavedDrive(item: DriveListItem) {
+    await runAction(() => invoke("mount_saved_drive", { driveId: item.id }), { refreshMounts: true });
   }
 
   function selectProtocol(protocol: ProtocolId) {
@@ -368,7 +421,7 @@ function App() {
         )}
 
         <section className="status-strip" aria-label="Overview">
-          <StatusTile icon={HardDrive} label="Mounted drives" value={String(mounts.length)} tone={mounts.length > 0 ? "good" : "muted"} />
+          <StatusTile icon={HardDrive} label="Saved drives" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
           <StatusTile icon={ShieldCheck} label="Protocols" value="WebDAV · FTP · SFTP · SMB" />
           <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
           <StatusTile icon={Database} label="Cache" value={cacheLabel(drive.cacheMode)} />
@@ -376,15 +429,15 @@ function App() {
 
         <div className="home-grid">
           <section className="drive-pane">
-            <PaneHeader title="Mounted drives" meta={`${mounts.length} active`} icon={HardDrive} />
+            <PaneHeader title="Network drives" meta={`${activeMounts.length} mounted`} icon={HardDrive} />
             <div className="drive-list">
-              {mounts.length > 0 ? (
-                mounts.map((item) => (
+              {driveItems.length > 0 ? (
+                driveItems.map((item) => (
                   <MountRow
                     key={item.id}
-                    mount={item}
-                    selected={selectedMount?.id === item.id}
-                    onSelect={() => setSelectedMountId(item.id)}
+                    drive={item}
+                    selected={selectedDrive?.id === item.id}
+                    onSelect={() => setSelectedDriveId(item.id)}
                   />
                 ))
               ) : (
@@ -481,7 +534,13 @@ function App() {
                     label="Local folder"
                     value={drive.mountPoint}
                     onChange={(value) => setDrive((current) => ({ ...current, mountPoint: value }))}
-                    placeholder="/Volumes/TeamDrive"
+                    placeholder="Choose folder"
+                    action={
+                      <button className="field-action" type="button" onClick={() => void chooseLocalFolder()}>
+                        <FolderOpen size={14} />
+                        <span>Browse</span>
+                      </button>
+                    }
                   />
                 </div>
 
@@ -521,13 +580,14 @@ function App() {
             </section>
 
             <section className="pane-section">
-              <PaneHeader title="Selected drive" meta={selectedMount ? selectedMount.status : "None selected"} icon={Activity} />
-              {selectedMount ? (
+              <PaneHeader title="Selected drive" meta={selectedDrive ? selectedDrive.status : "None selected"} icon={Activity} />
+              {selectedDrive ? (
                 <MountDetails
-                  mount={selectedMount}
+                  drive={selectedDrive}
                   busy={busy}
+                  onMount={() => void mountSavedDrive(selectedDrive)}
                   onUnmount={() =>
-                    void runAction(() => invoke("unmount", { mountPoint: selectedMount.mountPoint }), {
+                    void runAction(() => invoke("unmount", { mountPoint: selectedDrive.mountPoint }), {
                       refreshMounts: true,
                     })
                   }
@@ -647,7 +707,7 @@ function PaneHeader({ title, meta, icon: Icon }: { title: string; meta: string; 
   );
 }
 
-function MountRow({ mount, selected, onSelect }: { mount: MountSession; selected: boolean; onSelect: () => void }) {
+function MountRow({ drive, selected, onSelect }: { drive: DriveListItem; selected: boolean; onSelect: () => void }) {
   return (
     <button className={`mount-row ${selected ? "mount-row-selected" : ""}`} type="button" onClick={onSelect}>
       <div className="mount-row-icon">
@@ -655,13 +715,13 @@ function MountRow({ mount, selected, onSelect }: { mount: MountSession; selected
       </div>
       <div className="mount-row-main">
         <div className="mount-row-top">
-          <strong>{mount.mountPoint}</strong>
-          <span className={`health-pill health-pill-${mount.health}`}>{mount.status}</span>
+          <strong>{drive.displayName}</strong>
+          <span className={`health-pill health-pill-${drive.health}`}>{drive.status}</span>
         </div>
         <div className="mount-row-meta">
-          <span>{mount.protocol}</span>
-          <span>{mount.remote}</span>
-          <span>{mount.cacheMode}</span>
+          <span>{protocolLabel(drive.protocol)}</span>
+          <span>{drive.mountPoint}</span>
+          <span>{cacheLabelFromString(drive.cacheMode)}</span>
         </div>
       </div>
     </button>
@@ -688,17 +748,35 @@ function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCr
   );
 }
 
-function MountDetails({ mount, busy, onUnmount }: { mount: MountSession; busy: boolean; onUnmount: () => void }) {
+function MountDetails({
+  drive,
+  busy,
+  onMount,
+  onUnmount,
+}: {
+  drive: DriveListItem;
+  busy: boolean;
+  onMount: () => void;
+  onUnmount: () => void;
+}) {
   return (
     <div className="mount-details">
-      <DetailLine icon={HardDrive} label="Local folder" value={mount.mountPoint} />
-      <DetailLine icon={Cloud} label="Remote" value={mount.remote} />
-      <DetailLine icon={Wifi} label="Protocol" value={mount.protocol} />
-      <DetailLine icon={Database} label="Cache" value={mount.cacheMode} />
-      <button className="danger-button" type="button" disabled={busy} onClick={onUnmount}>
-        <Square size={15} />
-        <span>Unmount drive</span>
-      </button>
+      <DetailLine icon={HardDrive} label="Name" value={drive.displayName} />
+      <DetailLine icon={FolderOpen} label="Local folder" value={drive.mountPoint} />
+      <DetailLine icon={Cloud} label="Remote" value={drive.remote} />
+      <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
+      <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
+      {drive.mounted ? (
+        <button className="danger-button" type="button" disabled={busy} onClick={onUnmount}>
+          <Square size={15} />
+          <span>Unmount drive</span>
+        </button>
+      ) : (
+        <button className="submit-button" type="button" disabled={busy} onClick={onMount}>
+          {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+          <span>Mount drive</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -720,6 +798,7 @@ function TextInput({
   onChange,
   placeholder,
   type = "text",
+  action,
 }: {
   id?: string;
   label: string;
@@ -727,12 +806,17 @@ function TextInput({
   onChange: (value: string) => void;
   placeholder: string;
   type?: "text" | "password";
+  action?: ReactNode;
 }) {
+  const inputId = id ?? `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
-    <label className="field">
-      <span>{label}</span>
-      <input id={id} type={type} value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={placeholder} />
-    </label>
+    <div className="field">
+      <label htmlFor={inputId}>{label}</label>
+      <div className={action ? "input-with-action" : ""}>
+        <input id={inputId} type={type} value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={placeholder} />
+        {action}
+      </div>
+    </div>
   );
 }
 
@@ -747,17 +831,18 @@ function SelectInput({
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
 }) {
+  const inputId = `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
-    <label className="field">
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+    <div className="field">
+      <label htmlFor={inputId}>{label}</label>
+      <select id={inputId} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
       </select>
-    </label>
+    </div>
   );
 }
 
@@ -806,6 +891,44 @@ function toNetworkDriveRequest(form: DriveForm) {
     webdavVendor: form.webdavVendor,
     cacheMode: form.cacheMode,
   };
+}
+
+function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[]): DriveListItem[] {
+  const activeByMountPoint = new Map(activeMounts.map((mount) => [mount.mountPoint, mount]));
+  const activeByRemote = new Map(activeMounts.map((mount) => [mount.remote, mount]));
+  const savedItems = savedDrives.map((drive) => {
+    const active = activeByMountPoint.get(drive.mountPoint) ?? activeByRemote.get(drive.fs);
+    return {
+      id: drive.id,
+      displayName: drive.displayName,
+      protocol: drive.protocol,
+      remote: drive.fs,
+      mountPoint: drive.mountPoint,
+      status: active ? "mounted" : "ready",
+      cacheMode: drive.cacheMode,
+      health: active ? "healthy" : "standby",
+      mounted: Boolean(active),
+      fs: drive.fs,
+    } satisfies DriveListItem;
+  });
+
+  const savedMountPoints = new Set(savedDrives.map((drive) => drive.mountPoint));
+  const orphanMounts = activeMounts
+    .filter((mount) => !savedMountPoints.has(mount.mountPoint))
+    .map((mount) => ({
+      id: mount.id,
+      displayName: mount.mountPoint,
+      protocol: mount.protocol,
+      remote: mount.remote,
+      mountPoint: mount.mountPoint,
+      status: mount.status,
+      cacheMode: mount.cacheMode,
+      health: mount.health,
+      mounted: true,
+      fs: mount.remote,
+    }) satisfies DriveListItem);
+
+  return [...savedItems, ...orphanMounts];
 }
 
 function extractMounts(value: JsonValue): MountSession[] {
@@ -886,6 +1009,18 @@ function cacheLabel(mode: CacheMode) {
   if (mode === "full") return "Full cache";
   if (mode === "off") return "No cache";
   return "Smart cache";
+}
+
+function cacheLabelFromString(mode: string) {
+  if (mode === "full") return "Full cache";
+  if (mode === "off") return "No cache";
+  if (mode === "smart") return "Smart cache";
+  return mode || "Smart cache";
+}
+
+function protocolLabel(protocol: string) {
+  const match = protocols.find((item) => item.id === protocol.toLowerCase());
+  return match?.label ?? protocol;
 }
 
 function shortPath(value: string) {
