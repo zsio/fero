@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -91,6 +91,37 @@ struct TransferRequest {
 struct MountRequest {
     remote: String,
     mount_point: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDriveRequest {
+    protocol: String,
+    display_name: String,
+    mount_point: String,
+    url: Option<String>,
+    host: Option<String>,
+    port: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    domain: Option<String>,
+    share: Option<String>,
+    remote_path: Option<String>,
+    webdav_vendor: Option<String>,
+    cache_mode: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDriveResult {
+    protocol: String,
+    display_name: String,
+    remote_name: String,
+    fs: String,
+    mount_point: String,
+    cache_mode: String,
+    remote: Value,
+    mount: Value,
 }
 
 impl RcloneManager {
@@ -459,6 +490,134 @@ fn lock_manager<'a>(
         .map_err(|_| "rclone manager lock poisoned".to_string())
 }
 
+fn required_text(value: &str, label: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(format!("{label} is required"))
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn optional_text(value: &Option<String>) -> Option<String> {
+    value
+        .as_ref()
+        .map(|text| text.trim())
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+}
+
+fn push_param(params: &mut Map<String, Value>, key: &str, value: Option<String>) {
+    if let Some(value) = value {
+        params.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn protocol_parameters(request: &NetworkDriveRequest) -> Result<(String, Map<String, Value>), String> {
+    let protocol = request.protocol.trim().to_ascii_lowercase();
+    let mut params = Map::new();
+
+    match protocol.as_str() {
+        "webdav" => {
+            let url = optional_text(&request.url).ok_or("WebDAV address is required")?;
+            params.insert("url".to_string(), Value::String(url));
+            params.insert(
+                "vendor".to_string(),
+                Value::String(
+                    optional_text(&request.webdav_vendor).unwrap_or_else(|| "other".to_string()),
+                ),
+            );
+            push_param(&mut params, "user", optional_text(&request.username));
+            push_param(&mut params, "pass", optional_text(&request.password));
+        }
+        "ftp" => {
+            let host = optional_text(&request.host).ok_or("FTP server address is required")?;
+            params.insert("host".to_string(), Value::String(host));
+            push_param(&mut params, "port", optional_text(&request.port));
+            push_param(&mut params, "user", optional_text(&request.username));
+            push_param(&mut params, "pass", optional_text(&request.password));
+        }
+        "sftp" => {
+            let host = optional_text(&request.host).ok_or("SFTP server address is required")?;
+            params.insert("host".to_string(), Value::String(host));
+            push_param(&mut params, "port", optional_text(&request.port));
+            push_param(&mut params, "user", optional_text(&request.username));
+            push_param(&mut params, "pass", optional_text(&request.password));
+        }
+        "smb" => {
+            let host = optional_text(&request.host).ok_or("SMB server address is required")?;
+            params.insert("host".to_string(), Value::String(host));
+            push_param(&mut params, "user", optional_text(&request.username));
+            push_param(&mut params, "pass", optional_text(&request.password));
+            push_param(&mut params, "domain", optional_text(&request.domain));
+        }
+        _ => return Err(format!("unsupported protocol: {protocol}")),
+    }
+
+    Ok((protocol, params))
+}
+
+fn build_remote_name(display_name: &str, protocol: &str) -> String {
+    let slug = display_name
+        .chars()
+        .filter_map(|character| {
+            if character.is_ascii_alphanumeric() {
+                Some(character.to_ascii_lowercase())
+            } else if character.is_whitespace() || matches!(character, '-' | '_') {
+                Some('_')
+            } else {
+                None
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let slug = if slug.is_empty() { "drive" } else { &slug };
+    format!("{protocol}_{slug}_{}", short_nonce())
+}
+
+fn short_nonce() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{:x}", nanos % 0xffff_ffff)
+}
+
+fn build_remote_fs(
+    remote_name: &str,
+    protocol: &str,
+    share: &Option<String>,
+    remote_path: &Option<String>,
+) -> Result<String, String> {
+    let path = optional_text(remote_path).unwrap_or_default();
+
+    if protocol == "smb" {
+        let share = optional_text(share).ok_or("SMB share name is required")?;
+        let path = path.trim_start_matches('/');
+        if path.is_empty() {
+            return Ok(format!("{remote_name}:{share}"));
+        }
+        return Ok(format!("{remote_name}:{share}/{path}"));
+    }
+
+    if path.is_empty() || path == "/" {
+        Ok(format!("{remote_name}:"))
+    } else {
+        Ok(format!("{remote_name}:{path}"))
+    }
+}
+
+fn cache_mode_value(mode: &Option<String>) -> (String, u8) {
+    match optional_text(mode).unwrap_or_else(|| "smart".to_string()).as_str() {
+        "off" => ("off".to_string(), 0),
+        "full" => ("full".to_string(), 3),
+        _ => ("smart".to_string(), 2),
+    }
+}
+
 #[tauri::command]
 fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOverview, String> {
     let paths = resolve_paths(&app)?;
@@ -552,6 +711,66 @@ fn start_mount(
 }
 
 #[tauri::command]
+fn create_network_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: NetworkDriveRequest,
+) -> Result<NetworkDriveResult, String> {
+    let display_name = required_text(&request.display_name, "Drive name")?;
+    let mount_point = required_text(&request.mount_point, "Local mount folder")?;
+    let (protocol, parameters) = protocol_parameters(&request)?;
+    let remote_name = build_remote_name(&display_name, &protocol);
+    let fs = build_remote_fs(
+        &remote_name,
+        &protocol,
+        &request.share,
+        &request.remote_path,
+    )?;
+    let (cache_mode, cache_mode_value) = cache_mode_value(&request.cache_mode);
+
+    std::fs::create_dir_all(PathBuf::from(&mount_point)).map_err(|err| {
+        format!("failed to create local mount folder {mount_point}: {err}")
+    })?;
+
+    let mut manager = lock_manager(&state)?;
+    manager.ensure_started(&app)?;
+
+    let remote = manager.call_rc(
+        "config/create",
+        json!({
+            "name": &remote_name,
+            "type": &protocol,
+            "parameters": parameters,
+            "opt": {
+                "obscure": true,
+            },
+        }),
+    )?;
+
+    let mount = manager.call_rc(
+        "mount/mount",
+        json!({
+            "fs": &fs,
+            "mountPoint": &mount_point,
+            "vfsOpt": {
+                "CacheMode": cache_mode_value,
+            },
+        }),
+    )?;
+
+    Ok(NetworkDriveResult {
+        protocol,
+        display_name,
+        remote_name,
+        fs,
+        mount_point,
+        cache_mode,
+        remote,
+        mount,
+    })
+}
+
+#[tauri::command]
 fn unmount(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -591,6 +810,7 @@ pub fn run() {
             list_remotes,
             start_transfer,
             start_mount,
+            create_network_drive,
             unmount,
             list_mounts,
             job_status

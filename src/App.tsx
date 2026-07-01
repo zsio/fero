@@ -4,19 +4,22 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
   AlertTriangle,
-  CheckCircle2,
   Cloud,
   Database,
-  FileText,
   FolderOpen,
+  FolderPlus,
+  Globe2,
   HardDrive,
+  KeyRound,
   Loader2,
+  LockKeyhole,
+  Network,
   Play,
   Plus,
-  Power,
   RefreshCw,
   Server,
   Settings,
+  ShieldCheck,
   Square,
   Terminal,
   Wifi,
@@ -26,6 +29,8 @@ import type { LucideIcon } from "lucide-react";
 import "./App.css";
 
 type JsonValue = unknown;
+type ProtocolId = "webdav" | "ftp" | "sftp" | "smb";
+type CacheMode = "smart" | "full" | "off";
 
 type DaemonStatus = {
   running: boolean;
@@ -54,13 +59,25 @@ type MountSession = {
   mountPoint: string;
   status: string;
   cacheMode: string;
+  protocol: string;
   health: "healthy" | "attention";
   raw?: JsonValue;
 };
 
-type MountForm = {
-  remote: string;
+type DriveForm = {
+  protocol: ProtocolId;
+  displayName: string;
+  url: string;
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  domain: string;
+  share: string;
+  remotePath: string;
   mountPoint: string;
+  webdavVendor: string;
+  cacheMode: CacheMode;
 };
 
 type ActionOptions = {
@@ -68,6 +85,59 @@ type ActionOptions = {
   refreshMounts?: boolean;
   clearMounts?: boolean;
 };
+
+type ProtocolDefinition = {
+  id: ProtocolId;
+  label: string;
+  summary: string;
+  hint: string;
+  icon: LucideIcon;
+  defaultName: string;
+  defaultPort: string;
+  needsUrl?: boolean;
+  needsShare?: boolean;
+};
+
+const protocols: ProtocolDefinition[] = [
+  {
+    id: "webdav",
+    label: "WebDAV",
+    summary: "NAS, Nextcloud, Seafile and many private clouds",
+    hint: "Paste the WebDAV address from your service.",
+    icon: Globe2,
+    defaultName: "My WebDAV",
+    defaultPort: "",
+    needsUrl: true,
+  },
+  {
+    id: "sftp",
+    label: "SFTP",
+    summary: "Secure SSH file servers",
+    hint: "Use the SSH host, username and password for this server.",
+    icon: LockKeyhole,
+    defaultName: "My SFTP",
+    defaultPort: "22",
+  },
+  {
+    id: "ftp",
+    label: "FTP",
+    summary: "Classic FTP storage and hosting spaces",
+    hint: "Use FTP for legacy servers. Prefer SFTP when available.",
+    icon: Server,
+    defaultName: "My FTP",
+    defaultPort: "21",
+  },
+  {
+    id: "smb",
+    label: "SMB",
+    summary: "Windows shares and local network NAS",
+    hint: "Enter the server and share name, such as NAS and Media.",
+    icon: Network,
+    defaultName: "My SMB Share",
+    defaultPort: "",
+    needsShare: true,
+  },
+];
 
 const emptyOverview: AppOverview = {
   productName: "Fero",
@@ -84,6 +154,8 @@ const emptyOverview: AppOverview = {
   },
 };
 
+const initialDriveForm = makeDefaultForm("webdav");
+
 function App() {
   const [overview, setOverview] = useState<AppOverview>(emptyOverview);
   const [mounts, setMounts] = useState<MountSession[]>([]);
@@ -91,21 +163,21 @@ function App() {
   const [output, setOutput] = useState<JsonValue>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mount, setMount] = useState<MountForm>({ remote: "", mountPoint: "" });
+  const [drive, setDrive] = useState<DriveForm>(initialDriveForm);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   const daemonRunning = overview.daemon.running;
+  const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
   const selectedMount = useMemo(
     () => mounts.find((item) => item.id === selectedMountId) ?? mounts[0] ?? null,
     [mounts, selectedMountId],
   );
 
-  const versionText = useMemo(() => {
-    const version = overview.daemon.version;
-    if (version && typeof version === "object" && "version" in version) {
-      return String((version as { version?: unknown }).version ?? "running");
-    }
-    return daemonRunning ? "running" : "offline";
-  }, [daemonRunning, overview.daemon.version]);
+  const canCreateDrive =
+    drive.displayName.trim() &&
+    drive.mountPoint.trim() &&
+    (drive.protocol === "webdav" ? drive.url.trim() : drive.host.trim()) &&
+    (drive.protocol === "smb" ? drive.share.trim() : true);
 
   function updateMountSelection(nextMounts: MountSession[]) {
     setMounts(nextMounts);
@@ -138,7 +210,7 @@ function App() {
         await refreshMountsFromDaemon(showOutput);
       } else {
         updateMountSelection([]);
-        if (showOutput) setOutput({ daemon: "offline" });
+        if (showOutput) setOutput({ service: "offline" });
       }
     } catch (err) {
       const rawMessage = rawErrorMessage(err);
@@ -166,20 +238,40 @@ function App() {
       return result;
     } catch (err) {
       setError(errorMessage(err));
+      setDiagnosticsOpen(true);
       return null;
     } finally {
       setBusy(false);
     }
   }
 
-  async function startMount() {
-    const request = {
-      remote: mount.remote.trim(),
-      mountPoint: mount.mountPoint.trim(),
-    };
-    if (!request.remote || !request.mountPoint) return;
-    const result = await runAction(() => invoke("start_mount", { request }), { refreshMounts: true });
-    if (result) setMount({ remote: "", mountPoint: "" });
+  async function createNetworkDrive() {
+    if (!canCreateDrive) return;
+    const result = await runAction(
+      () =>
+        invoke("create_network_drive", {
+          request: toNetworkDriveRequest(drive),
+        }),
+      { refreshMounts: true },
+    );
+    if (result) {
+      setDrive(makeDefaultForm(drive.protocol));
+    }
+  }
+
+  function selectProtocol(protocol: ProtocolId) {
+    setDrive((current) => {
+      const next = makeDefaultForm(protocol);
+      const currentName = current.displayName.trim();
+      const shouldUseDefaultName = protocols.some((definition) => definition.defaultName === currentName);
+      return {
+        ...next,
+        displayName: shouldUseDefaultName || !currentName ? next.displayName : current.displayName,
+        mountPoint: current.mountPoint,
+        username: current.username,
+        password: current.password,
+      };
+    });
   }
 
   useEffect(() => {
@@ -195,17 +287,34 @@ function App() {
           </div>
           <div>
             <h1>Fero</h1>
-            <p>Mount manager</p>
+            <p>Network drives</p>
           </div>
         </div>
 
-        <section className={`daemon-panel ${daemonRunning ? "daemon-panel-online" : ""}`}>
-          <div className="daemon-state">
+        <nav className="side-nav" aria-label="Workspace">
+          <button className="side-nav-item side-nav-item-active" type="button">
+            <HardDrive size={17} />
+            <span>Drives</span>
+          </button>
+          <button className="side-nav-item" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
+            <Activity size={17} />
+            <span>Activity</span>
+          </button>
+          <button className="side-nav-item" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
+            <Settings size={17} />
+            <span>Diagnostics</span>
+          </button>
+        </nav>
+
+        <section className={`service-card ${daemonRunning ? "service-card-online" : ""}`}>
+          <div className="service-state">
             <StatusDot active={daemonRunning} />
-            <span>{daemonRunning ? "Daemon online" : "Daemon offline"}</span>
+            <div>
+              <strong>{daemonRunning ? "Service running" : "Service standby"}</strong>
+              <span>{daemonRunning ? "Ready to mount drives" : "Starts automatically when needed"}</span>
+            </div>
           </div>
-          <div className="daemon-version">{versionText}</div>
-          <div className="daemon-actions">
+          <div className="service-actions">
             <ToolbarButton
               icon={Play}
               variant="primary"
@@ -224,34 +333,9 @@ function App() {
           </div>
         </section>
 
-        <nav className="side-nav" aria-label="Workspace">
-          <button className="side-nav-item side-nav-item-active" type="button">
-            <HardDrive size={17} />
-            <span>Mounts</span>
-          </button>
-          <button
-            className="side-nav-item"
-            type="button"
-            disabled={busy}
-            onClick={() => void runAction(() => invoke("list_remotes"))}
-          >
-            <Cloud size={17} />
-            <span>Remotes</span>
-          </button>
-          <button
-            className="side-nav-item"
-            type="button"
-            disabled={busy}
-            onClick={() => void runAction(() => invoke("list_providers"))}
-          >
-            <Database size={17} />
-            <span>Providers</span>
-          </button>
-        </nav>
-
-        <div className="path-stack">
-          <PathLine icon={Settings} label="Config" value={overview.paths.rcloneConfig} />
-          <PathLine icon={FileText} label="Log" value={overview.paths.rcloneLog} />
+        <div className="sidebar-foot">
+          <PathLine icon={FolderOpen} label="Config" value={overview.paths.rcloneConfig} />
+          <PathLine icon={Terminal} label="Logs" value={overview.paths.rcloneLog} />
         </div>
       </aside>
 
@@ -259,35 +343,19 @@ function App() {
         <header className="workspace-header">
           <div>
             <div className="section-kicker">
-              <Activity size={14} />
-              <span>Mount control</span>
+              <Wifi size={14} />
+              <span>Local drive experience</span>
             </div>
-            <h2>Mounted drives</h2>
+            <h2>Network drives</h2>
+            <p>Mount WebDAV, FTP, SFTP and SMB storage as local folders.</p>
           </div>
 
           <div className="toolbar">
             <ToolbarButton icon={RefreshCw} disabled={busy} onClick={() => void refreshAll(true)}>
               Refresh
             </ToolbarButton>
-            <ToolbarButton
-              icon={Terminal}
-              disabled={busy}
-              onClick={() => void runAction(() => invoke("call_rclone_rc", { endpoint: "core/version", payload: {} }))}
-            >
-              Probe
-            </ToolbarButton>
-            <ToolbarButton
-              icon={daemonRunning ? Power : Play}
-              variant={daemonRunning ? "default" : "primary"}
-              disabled={busy}
-              onClick={() =>
-                void runAction(() => invoke(daemonRunning ? "stop_rclone" : "start_rclone"), {
-                  refreshMounts: !daemonRunning,
-                  clearMounts: daemonRunning,
-                })
-              }
-            >
-              {daemonRunning ? "Stop daemon" : "Start daemon"}
+            <ToolbarButton icon={Plus} variant="primary" disabled={busy} onClick={() => focusFirstCreateField()}>
+              Add drive
             </ToolbarButton>
           </div>
         </header>
@@ -300,16 +368,16 @@ function App() {
         )}
 
         <section className="status-strip" aria-label="Overview">
-          <StatusTile icon={Server} label="Daemon" value={daemonRunning ? "Online" : "Offline"} tone={daemonRunning ? "good" : "muted"} />
-          <StatusTile icon={HardDrive} label="Mounts" value={String(mounts.length)} tone={mounts.length > 0 ? "good" : "muted"} />
-          <StatusTile icon={Wifi} label="Endpoint" value={overview.daemon.endpoint ?? "Not bound"} />
-          <StatusTile icon={FolderOpen} label="Source" value={overview.daemon.source ?? "Sidecar pending"} />
+          <StatusTile icon={HardDrive} label="Mounted drives" value={String(mounts.length)} tone={mounts.length > 0 ? "good" : "muted"} />
+          <StatusTile icon={ShieldCheck} label="Protocols" value="WebDAV · FTP · SFTP · SMB" />
+          <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
+          <StatusTile icon={Database} label="Cache" value={cacheLabel(drive.cacheMode)} />
         </section>
 
         <div className="home-grid">
-          <section className="mount-pane">
-            <PaneHeader title="Mount sessions" meta={`${mounts.length} active`} icon={HardDrive} />
-            <div className="mount-list">
+          <section className="drive-pane">
+            <PaneHeader title="Mounted drives" meta={`${mounts.length} active`} icon={HardDrive} />
+            <div className="drive-list">
               {mounts.length > 0 ? (
                 mounts.map((item) => (
                   <MountRow
@@ -320,42 +388,140 @@ function App() {
                   />
                 ))
               ) : (
-                <EmptyMounts daemonRunning={daemonRunning} />
+                <EmptyMounts daemonRunning={daemonRunning} onCreate={() => focusFirstCreateField()} />
               )}
             </div>
           </section>
 
           <aside className="detail-pane">
-            <section className="pane-section">
-              <PaneHeader title="New mount" meta={daemonRunning ? "Daemon ready" : "Starts daemon if needed"} icon={Plus} />
+            <section className="pane-section create-pane">
+              <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
+              <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
+
               <form
-                className="mount-form"
+                className="drive-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void startMount();
+                  void createNetworkDrive();
                 }}
               >
-                <Input
-                  label="Remote"
-                  value={mount.remote}
-                  onChange={(value) => setMount((current) => ({ ...current, remote: value }))}
-                  placeholder="drive:"
+                <TextInput
+                  id="drive-name"
+                  label="Drive name"
+                  value={drive.displayName}
+                  onChange={(value) => setDrive((current) => ({ ...current, displayName: value }))}
+                  placeholder={selectedProtocol.defaultName}
                 />
-                <Input
-                  label="Mount point"
-                  value={mount.mountPoint}
-                  onChange={(value) => setMount((current) => ({ ...current, mountPoint: value }))}
-                  placeholder="/Volumes/FeroDrive"
-                />
-                <button className="submit-button" type="submit" disabled={busy || !mount.remote.trim() || !mount.mountPoint.trim()}>
+
+                {drive.protocol === "webdav" ? (
+                  <TextInput
+                    label="WebDAV address"
+                    value={drive.url}
+                    onChange={(value) => setDrive((current) => ({ ...current, url: value }))}
+                    placeholder="https://cloud.example.com/remote.php/dav/files/me/"
+                  />
+                ) : (
+                  <div className="form-grid two">
+                    <TextInput
+                      label="Server"
+                      value={drive.host}
+                      onChange={(value) => setDrive((current) => ({ ...current, host: value }))}
+                      placeholder={drive.protocol === "smb" ? "NAS.local" : "files.example.com"}
+                    />
+                    <TextInput
+                      label="Port"
+                      value={drive.port}
+                      onChange={(value) => setDrive((current) => ({ ...current, port: value }))}
+                      placeholder={selectedProtocol.defaultPort || "default"}
+                    />
+                  </div>
+                )}
+
+                {drive.protocol === "smb" && (
+                  <div className="form-grid two">
+                    <TextInput
+                      label="Share name"
+                      value={drive.share}
+                      onChange={(value) => setDrive((current) => ({ ...current, share: value }))}
+                      placeholder="Media"
+                    />
+                    <TextInput
+                      label="Domain"
+                      value={drive.domain}
+                      onChange={(value) => setDrive((current) => ({ ...current, domain: value }))}
+                      placeholder="optional"
+                    />
+                  </div>
+                )}
+
+                <div className="form-grid two">
+                  <TextInput
+                    label="Username"
+                    value={drive.username}
+                    onChange={(value) => setDrive((current) => ({ ...current, username: value }))}
+                    placeholder="optional"
+                  />
+                  <TextInput
+                    label="Password"
+                    type="password"
+                    value={drive.password}
+                    onChange={(value) => setDrive((current) => ({ ...current, password: value }))}
+                    placeholder="optional"
+                  />
+                </div>
+
+                <div className="form-grid two">
+                  <TextInput
+                    label="Remote folder"
+                    value={drive.remotePath}
+                    onChange={(value) => setDrive((current) => ({ ...current, remotePath: value }))}
+                    placeholder={drive.protocol === "smb" ? "optional subfolder" : "/"}
+                  />
+                  <TextInput
+                    label="Local folder"
+                    value={drive.mountPoint}
+                    onChange={(value) => setDrive((current) => ({ ...current, mountPoint: value }))}
+                    placeholder="/Volumes/TeamDrive"
+                  />
+                </div>
+
+                <div className="form-grid two">
+                  {drive.protocol === "webdav" ? (
+                    <SelectInput
+                      label="WebDAV type"
+                      value={drive.webdavVendor}
+                      onChange={(value) => setDrive((current) => ({ ...current, webdavVendor: value }))}
+                      options={[
+                        { value: "other", label: "Generic WebDAV" },
+                        { value: "nextcloud", label: "Nextcloud" },
+                        { value: "owncloud", label: "ownCloud" },
+                        { value: "sharepoint", label: "SharePoint" },
+                      ]}
+                    />
+                  ) : (
+                    <ProtocolHint protocol={selectedProtocol} />
+                  )}
+                  <SelectInput
+                    label="Cache"
+                    value={drive.cacheMode}
+                    onChange={(value) => setDrive((current) => ({ ...current, cacheMode: value as CacheMode }))}
+                    options={[
+                      { value: "smart", label: "Smart cache" },
+                      { value: "full", label: "Full cache" },
+                      { value: "off", label: "No cache" },
+                    ]}
+                  />
+                </div>
+
+                <button className="submit-button" type="submit" disabled={busy || !canCreateDrive}>
                   {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                  <span>Start mount</span>
+                  <span>Connect and mount</span>
                 </button>
               </form>
             </section>
 
             <section className="pane-section">
-              <PaneHeader title="Selected mount" meta={selectedMount ? selectedMount.status : "None selected"} icon={Activity} />
+              <PaneHeader title="Selected drive" meta={selectedMount ? selectedMount.status : "None selected"} icon={Activity} />
               {selectedMount ? (
                 <MountDetails
                   mount={selectedMount}
@@ -369,19 +535,58 @@ function App() {
               ) : (
                 <div className="empty-detail">
                   <XCircle size={18} />
-                  <span>No active mount selected</span>
+                  <span>Select a mounted drive to see its local folder, protocol and cache status.</span>
                 </div>
               )}
             </section>
 
-            <section className="pane-section output-section">
-              <PaneHeader title="Last response" meta="Tauri / rclone RC" icon={Terminal} />
-              <pre className="output">{output ? JSON.stringify(output, null, 2) : "No command output yet."}</pre>
+            <section className={`pane-section diagnostics-section ${diagnosticsOpen ? "diagnostics-section-open" : ""}`}>
+              <button className="diagnostics-toggle" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
+                <span>
+                  <Terminal size={16} />
+                  Diagnostics
+                </span>
+                <small>{diagnosticsOpen ? "Hide" : "Show"}</small>
+              </button>
+              {diagnosticsOpen && (
+                <pre className="output">{output ? JSON.stringify(output, null, 2) : "No diagnostic output yet."}</pre>
+              )}
             </section>
           </aside>
         </div>
       </section>
     </main>
+  );
+}
+
+function ProtocolPicker({ selected, onSelect }: { selected: ProtocolId; onSelect: (protocol: ProtocolId) => void }) {
+  return (
+    <div className="protocol-grid" aria-label="Choose a protocol">
+      {protocols.map((protocol) => {
+        const Icon = protocol.icon;
+        const active = protocol.id === selected;
+        return (
+          <button
+            key={protocol.id}
+            className={`protocol-option ${active ? "protocol-option-active" : ""}`}
+            type="button"
+            onClick={() => onSelect(protocol.id)}
+          >
+            <Icon size={18} />
+            <span>{protocol.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProtocolHint({ protocol }: { protocol: ProtocolDefinition }) {
+  return (
+    <div className="protocol-hint">
+      <KeyRound size={15} />
+      <span>{protocol.hint}</span>
+    </div>
   );
 }
 
@@ -454,6 +659,7 @@ function MountRow({ mount, selected, onSelect }: { mount: MountSession; selected
           <span className={`health-pill health-pill-${mount.health}`}>{mount.status}</span>
         </div>
         <div className="mount-row-meta">
+          <span>{mount.protocol}</span>
           <span>{mount.remote}</span>
           <span>{mount.cacheMode}</span>
         </div>
@@ -462,14 +668,22 @@ function MountRow({ mount, selected, onSelect }: { mount: MountSession; selected
   );
 }
 
-function EmptyMounts({ daemonRunning }: { daemonRunning: boolean }) {
+function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCreate: () => void }) {
   return (
     <div className="empty-mounts">
       <div className="empty-icon">
-        <HardDrive size={22} />
+        <FolderPlus size={24} />
       </div>
-      <strong>{daemonRunning ? "No active mounts" : "Daemon is offline"}</strong>
-      <span>{daemonRunning ? "Create a mount from a configured remote." : "Start the daemon before refreshing mount sessions."}</span>
+      <strong>{daemonRunning ? "No network drives yet" : "Add your first network drive"}</strong>
+      <span>
+        {daemonRunning
+          ? "Choose a protocol, enter your server details, and Fero will mount it as a local folder."
+          : "Fero will start its mount service automatically when you connect a drive."}
+      </span>
+      <button className="empty-action" type="button" onClick={onCreate}>
+        <Plus size={16} />
+        <span>Add network drive</span>
+      </button>
     </div>
   );
 }
@@ -477,13 +691,13 @@ function EmptyMounts({ daemonRunning }: { daemonRunning: boolean }) {
 function MountDetails({ mount, busy, onUnmount }: { mount: MountSession; busy: boolean; onUnmount: () => void }) {
   return (
     <div className="mount-details">
-      <DetailLine icon={HardDrive} label="Mount point" value={mount.mountPoint} />
+      <DetailLine icon={HardDrive} label="Local folder" value={mount.mountPoint} />
       <DetailLine icon={Cloud} label="Remote" value={mount.remote} />
-      <DetailLine icon={CheckCircle2} label="Health" value={mount.health === "healthy" ? "Mounted" : "Needs attention"} />
+      <DetailLine icon={Wifi} label="Protocol" value={mount.protocol} />
       <DetailLine icon={Database} label="Cache" value={mount.cacheMode} />
       <button className="danger-button" type="button" disabled={busy} onClick={onUnmount}>
         <Square size={15} />
-        <span>Unmount</span>
+        <span>Unmount drive</span>
       </button>
     </div>
   );
@@ -499,21 +713,50 @@ function DetailLine({ icon: Icon, label, value }: { icon: LucideIcon; label: str
   );
 }
 
-function Input({
+function TextInput({
+  id,
   label,
   value,
   onChange,
   placeholder,
+  type = "text",
 }: {
+  id?: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  type?: "text" | "password";
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={placeholder} />
+      <input id={id} type={type} value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={placeholder} />
+    </label>
+  );
+}
+
+function SelectInput({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }
@@ -526,6 +769,43 @@ function PathLine({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
       <strong title={value}>{shortPath(value)}</strong>
     </div>
   );
+}
+
+function makeDefaultForm(protocol: ProtocolId): DriveForm {
+  const definition = protocols.find((item) => item.id === protocol) ?? protocols[0];
+  return {
+    protocol,
+    displayName: definition.defaultName,
+    url: "",
+    host: "",
+    port: definition.defaultPort,
+    username: "",
+    password: "",
+    domain: "",
+    share: "",
+    remotePath: "",
+    mountPoint: "",
+    webdavVendor: "other",
+    cacheMode: "smart",
+  };
+}
+
+function toNetworkDriveRequest(form: DriveForm) {
+  return {
+    protocol: form.protocol,
+    displayName: form.displayName,
+    mountPoint: form.mountPoint,
+    url: form.url,
+    host: form.host,
+    port: form.port,
+    username: form.username,
+    password: form.password,
+    domain: form.domain,
+    share: form.share,
+    remotePath: form.remotePath,
+    webdavVendor: form.webdavVendor,
+    cacheMode: form.cacheMode,
+  };
 }
 
 function extractMounts(value: JsonValue): MountSession[] {
@@ -547,10 +827,11 @@ function mountFromItem(item: JsonValue, index: number): MountSession | null {
   if (typeof item === "string") {
     return {
       id: item,
-      remote: "rclone mount",
+      remote: "Network drive",
       mountPoint: item,
       status: "mounted",
       cacheMode: "rclone default",
+      protocol: "Unknown",
       health: "healthy",
       raw: item,
     };
@@ -562,7 +843,7 @@ function mountFromItem(item: JsonValue, index: number): MountSession | null {
   const mountPoint = stringField(record, ["mountPoint", "MountPoint", "mount_point", "path", "Path"]);
   if (!mountPoint) return null;
 
-  const remote = stringField(record, ["fs", "Fs", "remote", "Remote", "source", "Source"]) ?? "rclone mount";
+  const remote = stringField(record, ["fs", "Fs", "remote", "Remote", "source", "Source"]) ?? "Network drive";
   const status = stringField(record, ["status", "Status", "state", "State"]) ?? "mounted";
   const cacheMode = stringField(record, ["cacheMode", "CacheMode", "vfsCacheMode", "VfsCacheMode"]) ?? "rclone default";
   const health = status.toLowerCase().includes("error") ? "attention" : "healthy";
@@ -573,9 +854,19 @@ function mountFromItem(item: JsonValue, index: number): MountSession | null {
     mountPoint,
     status,
     cacheMode,
+    protocol: protocolFromRemote(remote),
     health,
     raw: item,
   };
+}
+
+function protocolFromRemote(remote: string) {
+  const lower = remote.toLowerCase();
+  if (lower.includes("webdav_")) return "WebDAV";
+  if (lower.includes("sftp_")) return "SFTP";
+  if (lower.includes("ftp_")) return "FTP";
+  if (lower.includes("smb_")) return "SMB";
+  return "Network";
 }
 
 function asRecord(value: JsonValue): Record<string, JsonValue> | null {
@@ -591,11 +882,21 @@ function stringField(record: Record<string, JsonValue>, keys: string[]) {
   return null;
 }
 
+function cacheLabel(mode: CacheMode) {
+  if (mode === "full") return "Full cache";
+  if (mode === "off") return "No cache";
+  return "Smart cache";
+}
+
 function shortPath(value: string) {
   if (!value) return "not resolved";
   const normalized = value.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts.slice(-2).join("/") || value;
+}
+
+function focusFirstCreateField() {
+  document.getElementById("drive-name")?.focus();
 }
 
 function errorMessage(err: unknown) {
