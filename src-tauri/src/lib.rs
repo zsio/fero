@@ -127,6 +127,15 @@ struct NetworkDriveResult {
     mount: Value,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveDriveResult {
+    drive: SavedDrive,
+    unmount: Option<Value>,
+    remote: Option<Value>,
+    warnings: Vec<String>,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedDrive {
@@ -702,6 +711,17 @@ fn save_drive(app: &AppHandle, drive: SavedDrive) -> Result<SavedDrive, String> 
     Ok(drive)
 }
 
+fn delete_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, String> {
+    let mut drives = read_drive_catalog(app)?;
+    let index = drives
+        .iter()
+        .position(|drive| drive.id == drive_id)
+        .ok_or_else(|| "saved drive was not found".to_string())?;
+    let drive = drives.remove(index);
+    write_drive_catalog(app, &drives)?;
+    Ok(drive)
+}
+
 fn find_saved_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, String> {
     read_drive_catalog(app)?
         .into_iter()
@@ -907,6 +927,43 @@ fn mount_saved_drive(
 }
 
 #[tauri::command]
+fn remove_saved_drive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    drive_id: String,
+) -> Result<RemoveDriveResult, String> {
+    let drive = find_saved_drive(&app, &drive_id)?;
+    let mut warnings = Vec::new();
+    let mut unmount = None;
+    let mut remote = None;
+
+    match lock_manager(&state).and_then(|mut manager| {
+        manager.ensure_started(&app)?;
+        Ok(manager)
+    }) {
+        Ok(manager) => {
+            match manager.call_rc("mount/unmount", json!({ "mountPoint": &drive.mount_point })) {
+                Ok(value) => unmount = Some(value),
+                Err(err) => warnings.push(format!("Unmount skipped: {err}")),
+            }
+            match manager.call_rc("config/delete", json!({ "name": &drive.remote_name })) {
+                Ok(value) => remote = Some(value),
+                Err(err) => warnings.push(format!("Remote cleanup skipped: {err}")),
+            }
+        }
+        Err(err) => warnings.push(format!("Service cleanup skipped: {err}")),
+    }
+
+    let drive = delete_drive(&app, &drive_id)?;
+    Ok(RemoveDriveResult {
+        drive,
+        unmount,
+        remote,
+        warnings,
+    })
+}
+
+#[tauri::command]
 fn unmount(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -949,6 +1006,7 @@ pub fn run() {
             start_mount,
             create_network_drive,
             mount_saved_drive,
+            remove_saved_drive,
             unmount,
             list_mounts,
             job_status

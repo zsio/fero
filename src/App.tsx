@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { confirm as confirmDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   Activity,
   AlertTriangle,
   Cloud,
   Database,
+  ExternalLink,
   FolderOpen,
   FolderPlus,
   Globe2,
@@ -23,6 +25,7 @@ import {
   ShieldCheck,
   Square,
   Terminal,
+  Trash2,
   Wifi,
   XCircle,
 } from "lucide-react";
@@ -312,6 +315,29 @@ function App() {
     await runAction(() => invoke("mount_saved_drive", { driveId: item.id }), { refreshMounts: true });
   }
 
+  async function removeSavedDrive(item: DriveListItem) {
+    const confirmed = await confirmDialog(
+      `Remove "${item.displayName}" from Fero? This will unmount it if possible and remove its saved connection.`,
+      {
+        title: "Remove network drive",
+        kind: "warning",
+        okLabel: "Remove",
+        cancelLabel: "Cancel",
+      },
+    );
+    if (!confirmed) return;
+    await runAction(() => invoke("remove_saved_drive", { driveId: item.id }), { refreshMounts: true });
+  }
+
+  async function openLocalFolder(item: DriveListItem) {
+    setError(null);
+    try {
+      await openPath(item.mountPoint);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   function selectProtocol(protocol: ProtocolId) {
     setDrive((current) => {
       const next = makeDefaultForm(protocol);
@@ -586,11 +612,13 @@ function App() {
                   drive={selectedDrive}
                   busy={busy}
                   onMount={() => void mountSavedDrive(selectedDrive)}
+                  onOpen={() => void openLocalFolder(selectedDrive)}
                   onUnmount={() =>
                     void runAction(() => invoke("unmount", { mountPoint: selectedDrive.mountPoint }), {
                       refreshMounts: true,
                     })
                   }
+                  onRemove={() => void removeSavedDrive(selectedDrive)}
                 />
               ) : (
                 <div className="empty-detail">
@@ -752,12 +780,16 @@ function MountDetails({
   drive,
   busy,
   onMount,
+  onOpen,
   onUnmount,
+  onRemove,
 }: {
   drive: DriveListItem;
   busy: boolean;
   onMount: () => void;
+  onOpen: () => void;
   onUnmount: () => void;
+  onRemove: () => void;
 }) {
   return (
     <div className="mount-details">
@@ -767,16 +799,32 @@ function MountDetails({
       <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
       {drive.mounted ? (
-        <button className="danger-button" type="button" disabled={busy} onClick={onUnmount}>
-          <Square size={15} />
-          <span>Unmount drive</span>
-        </button>
+        <div className="drive-actions">
+          <button className="submit-button" type="button" disabled={busy} onClick={onOpen}>
+            <ExternalLink size={15} />
+            <span>Open folder</span>
+          </button>
+          <button className="secondary-button" type="button" disabled={busy} onClick={onUnmount}>
+            <Square size={15} />
+            <span>Unmount</span>
+          </button>
+        </div>
       ) : (
-        <button className="submit-button" type="button" disabled={busy} onClick={onMount}>
-          {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-          <span>Mount drive</span>
-        </button>
+        <div className="drive-actions">
+          <button className="submit-button" type="button" disabled={busy} onClick={onMount}>
+            {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+            <span>Mount drive</span>
+          </button>
+          <button className="secondary-button" type="button" disabled={busy} onClick={onOpen}>
+            <ExternalLink size={15} />
+            <span>Open folder</span>
+          </button>
+        </div>
       )}
+      <button className="danger-button" type="button" disabled={busy} onClick={onRemove}>
+        <Trash2 size={15} />
+        <span>Remove from Fero</span>
+      </button>
     </div>
   );
 }

@@ -281,6 +281,7 @@ button:disabled {
 
 .tool-button,
 .submit-button,
+.secondary-button,
 .danger-button,
 .empty-action {
   display: inline-flex;
@@ -304,6 +305,7 @@ button:disabled {
 
 .tool-button:hover:not(:disabled),
 .submit-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
 .danger-button:hover:not(:disabled),
 .empty-action:hover:not(:disabled) {
   border-color: var(--line-strong);
@@ -312,6 +314,7 @@ button:disabled {
 
 .tool-button:active:not(:disabled),
 .submit-button:active:not(:disabled),
+.secondary-button:active:not(:disabled),
 .danger-button:active:not(:disabled),
 .empty-action:active:not(:disabled) {
   transform: translateY(1px);
@@ -747,6 +750,13 @@ button:disabled {
   padding: 0 14px 14px;
 }
 
+.drive-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .detail-line {
   display: grid;
   grid-template-columns: 18px 90px minmax(0, 1fr);
@@ -775,8 +785,10 @@ button:disabled {
   color: #ffd3d0;
 }
 
-.mount-details .submit-button {
-  margin-top: 12px;
+.secondary-button {
+  border-color: var(--line);
+  background: #151b20;
+  color: var(--muted-strong);
 }
 
 .diagnostics-section {
