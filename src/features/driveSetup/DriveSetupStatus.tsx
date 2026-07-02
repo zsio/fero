@@ -6,6 +6,7 @@ import {
   FolderOpen,
   HardDrive,
   KeyRound,
+  LockKeyhole,
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
@@ -160,6 +161,12 @@ function setupSteps(
       label: "Launch restore",
       state: form.autoMount ? "ready" : "neutral",
       value: form.autoMount ? "On launch" : "Manual",
+    },
+    {
+      icon: LockKeyhole,
+      label: "Access mode",
+      state: form.readOnly ? "ready" : "neutral",
+      value: form.readOnly ? "Read-only" : "Read/write",
     },
     {
       icon: Database,

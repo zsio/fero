@@ -38,6 +38,7 @@ export type DriveForm = {
   webdavVendor: string;
   cacheMode: CacheMode;
   autoMount: boolean;
+  readOnly: boolean;
 };
 
 export type NetworkDriveTestResult = {
@@ -128,6 +129,7 @@ export function makeDefaultForm(protocol: ProtocolId): DriveForm {
     webdavVendor: "other",
     cacheMode: "smart",
     autoMount: true,
+    readOnly: false,
   };
 }
 

@@ -113,6 +113,7 @@ struct NetworkDriveRequest {
     webdav_vendor: Option<String>,
     cache_mode: Option<String>,
     auto_mount: Option<bool>,
+    read_only: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -254,6 +255,8 @@ struct SavedDrive {
     cache_mode: String,
     #[serde(default = "default_auto_mount")]
     auto_mount: bool,
+    #[serde(default)]
+    read_only: bool,
     #[serde(default)]
     url: Option<String>,
     #[serde(default)]
@@ -1234,6 +1237,7 @@ fn mount_drive(manager: &RcloneManager, drive: &SavedDrive) -> Result<Value, Str
             "mountPoint": &drive.mount_point,
             "vfsOpt": {
                 "CacheMode": cache_mode_number(&drive.cache_mode),
+                "ReadOnly": drive.read_only,
             },
         }),
     )
@@ -1260,6 +1264,7 @@ fn apply_request_to_drive(
     drive.share = optional_text(&request.share);
     drive.webdav_vendor = optional_text(&request.webdav_vendor);
     drive.auto_mount = request.auto_mount.unwrap_or(drive.auto_mount);
+    drive.read_only = request.read_only.unwrap_or(drive.read_only);
     drive.last_mount_state = Some("ready".to_string());
     drive.last_issue_summary = None;
     drive.last_issue_recommendation = None;
@@ -1679,6 +1684,7 @@ fn create_network_drive(
             "mountPoint": &mount_point,
             "vfsOpt": {
                 "CacheMode": cache_mode_value,
+                "ReadOnly": request.read_only.unwrap_or_default(),
             },
         }),
     )?;
@@ -1695,6 +1701,7 @@ fn create_network_drive(
             remote_path: optional_text(&request.remote_path).unwrap_or_default(),
             cache_mode: cache_mode.clone(),
             auto_mount: request.auto_mount.unwrap_or_else(default_auto_mount),
+            read_only: request.read_only.unwrap_or_default(),
             url: optional_text(&request.url),
             host: optional_text(&request.host),
             port: optional_text(&request.port),

@@ -116,6 +116,7 @@ type SavedDrive = {
   remotePath: string;
   cacheMode: string;
   autoMount?: boolean;
+  readOnly?: boolean;
   url?: string | null;
   host?: string | null;
   port?: string | null;
@@ -143,6 +144,7 @@ type DriveListItem = {
   mounted: boolean;
   fs: string;
   autoMount: boolean;
+  readOnly: boolean;
   remotePath: string;
   url?: string | null;
   host?: string | null;
@@ -1046,6 +1048,7 @@ function formFromDriveItem(item: DriveListItem): DriveForm {
     webdavVendor: item.webdavVendor ?? "other",
     cacheMode: normalizeCacheMode(item.cacheMode),
     autoMount: item.autoMount,
+    readOnly: item.readOnly,
   };
 }
 
@@ -1065,6 +1068,7 @@ function toNetworkDriveRequest(form: DriveForm) {
     webdavVendor: form.webdavVendor,
     cacheMode: form.cacheMode,
     autoMount: form.autoMount,
+    readOnly: form.readOnly,
   };
 }
 
@@ -1086,6 +1090,7 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       mounted: Boolean(active),
       fs: drive.fs,
       autoMount: drive.autoMount !== false,
+      readOnly: drive.readOnly === true,
       remotePath: drive.remotePath,
       url: drive.url,
       host: drive.host,
@@ -1117,6 +1122,7 @@ function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[])
       mounted: true,
       fs: mount.remote,
       autoMount: false,
+      readOnly: false,
       remotePath: "",
     }) satisfies DriveListItem);
 
@@ -1228,6 +1234,7 @@ function driveDetailsView(drive: DriveListItem): MountDetailsDrive {
     protocolLabel: protocolLabel(drive.protocol),
     cacheMode: drive.cacheMode,
     autoMount: drive.autoMount,
+    readOnly: drive.readOnly,
     mounted: drive.mounted,
     health: drive.health,
     status: drive.status,

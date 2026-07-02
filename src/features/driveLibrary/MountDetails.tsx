@@ -7,6 +7,7 @@ import {
   FolderOpen,
   HardDrive,
   Loader2,
+  LockKeyhole,
   Pencil,
   Play,
   RefreshCw,
@@ -26,6 +27,7 @@ export type MountDetailsDrive = {
   protocolLabel: string;
   cacheMode: string;
   autoMount: boolean;
+  readOnly: boolean;
   mounted: boolean;
   health: "healthy" | "attention" | "standby";
   status: string;
@@ -109,6 +111,7 @@ export function MountDetails({
       <DetailLine icon={Wifi} label="Protocol" value={drive.protocolLabel} />
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
+      <DetailLine icon={LockKeyhole} label="Access" value={drive.readOnly ? "Read-only" : "Read/write"} />
       {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
       <CachePanel
         cacheMode={drive.cacheMode}

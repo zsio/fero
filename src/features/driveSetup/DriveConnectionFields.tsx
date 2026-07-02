@@ -1,4 +1,5 @@
-import { FolderOpen, RefreshCw } from "lucide-react";
+import { FolderOpen, LockKeyhole, RefreshCw } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { FieldActionButton, FieldGrid, SelectInput, TextInput } from "./FormControls";
 import { ProtocolHint } from "./ProtocolSetup";
 import type { CacheMode, DriveForm, ProtocolDefinition } from "./model";
@@ -152,24 +153,49 @@ export function DriveConnectionFields({
         />
       </FieldGrid>
 
-      <MountBehaviorToggle
-        id={`${idPrefix}-auto-mount`}
-        enabled={form.autoMount}
-        onChange={(autoMount) => onChange({ autoMount })}
-      />
+      <FieldGrid columns={2}>
+        <MountBehaviorToggle
+          icon={RefreshCw}
+          id={`${idPrefix}-auto-mount`}
+          title="Restore on launch"
+          enabled={form.autoMount}
+          enabledLabel="Automatic"
+          disabledLabel="Manual"
+          onChange={(autoMount) => onChange({ autoMount })}
+        />
+        <MountBehaviorToggle
+          icon={LockKeyhole}
+          id={`${idPrefix}-read-only`}
+          title="Read-only mount"
+          enabled={form.readOnly}
+          enabledLabel="Read-only"
+          disabledLabel="Read/write"
+          onChange={(readOnly) => onChange({ readOnly })}
+        />
+      </FieldGrid>
     </>
   );
 }
 
 function MountBehaviorToggle({
+  icon: Icon,
   id,
+  title,
   enabled,
+  enabledLabel,
+  disabledLabel,
   onChange,
 }: {
+  icon: LucideIcon;
   id: string;
+  title: string;
   enabled: boolean;
+  enabledLabel: string;
+  disabledLabel: string;
   onChange: (enabled: boolean) => void;
 }) {
+  const valueLabel = enabled ? enabledLabel : disabledLabel;
+
   return (
     <label
       className={`grid min-h-[42px] cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors ${
@@ -179,12 +205,10 @@ function MountBehaviorToggle({
       }`}
       htmlFor={id}
     >
-      <RefreshCw size={15} className={enabled ? "text-[var(--accent)]" : "text-[var(--muted-strong)]"} />
+      <Icon size={15} className={enabled ? "text-[var(--accent)]" : "text-[var(--muted-strong)]"} />
       <span className="min-w-0">
-        <strong className="block truncate text-xs font-bold text-[var(--ink-strong)]">Restore on launch</strong>
-        <small className="mt-0.5 block text-[11px] text-[var(--muted)]">
-          {enabled ? "Automatic" : "Manual"}
-        </small>
+        <strong className="block truncate text-xs font-bold text-[var(--ink-strong)]">{title}</strong>
+        <small className="mt-0.5 block text-[11px] text-[var(--muted)]">{valueLabel}</small>
       </span>
       <span
         className={`relative h-[22px] w-[38px] rounded-full border transition-colors ${
