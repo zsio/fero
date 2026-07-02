@@ -33,6 +33,17 @@ export type DriveForm = {
   cacheMode: CacheMode;
 };
 
+export type NetworkDriveTestResult = {
+  ok: boolean;
+  protocol: string;
+  fs: string;
+  summary: string;
+  recommendation: string;
+  details?: string | null;
+  itemCount?: number | null;
+  warnings: string[];
+};
+
 export type ProtocolDefinition = {
   id: ProtocolId;
   label: string;

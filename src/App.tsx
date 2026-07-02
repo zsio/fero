@@ -26,6 +26,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
 import { ProtocolHint, ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
@@ -43,6 +44,7 @@ import type {
   CacheMode,
   DriveForm,
   MountPointSuggestion,
+  NetworkDriveTestResult,
   ProtocolId,
 } from "./features/driveSetup/model";
 import "./styles/index.css";
@@ -160,17 +162,6 @@ type RestoreDrivesResult = {
   mounted: number;
   skipped: number;
   items: RestoreDriveItem[];
-};
-
-type NetworkDriveTestResult = {
-  ok: boolean;
-  protocol: string;
-  fs: string;
-  summary: string;
-  recommendation: string;
-  details?: string | null;
-  itemCount?: number | null;
-  warnings: string[];
 };
 
 type DriveCacheStatus = {
@@ -1216,23 +1207,6 @@ function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCr
         <Plus size={16} />
         <span>Add network drive</span>
       </button>
-    </div>
-  );
-}
-
-function ConnectionTestPanel({ result }: { result: NetworkDriveTestResult }) {
-  const Icon = result.ok ? ShieldCheck : AlertTriangle;
-  return (
-    <div className={`connection-result ${result.ok ? "connection-result-ok" : "connection-result-failed"}`}>
-      <div className="connection-result-heading">
-        <Icon size={16} />
-        <strong>{result.summary}</strong>
-      </div>
-      <span>{result.recommendation}</span>
-      {result.ok && typeof result.itemCount === "number" && (
-        <small>{result.itemCount} item{result.itemCount === 1 ? "" : "s"} visible in the checked folder.</small>
-      )}
-      {result.warnings.length > 0 && <small>{result.warnings.join(" ")}</small>}
     </div>
   );
 }
