@@ -1045,6 +1045,7 @@ function formFromDriveItem(item: DriveListItem): DriveForm {
     mountPoint: item.mountPoint,
     webdavVendor: item.webdavVendor ?? "other",
     cacheMode: normalizeCacheMode(item.cacheMode),
+    autoMount: item.autoMount,
   };
 }
 
@@ -1063,6 +1064,7 @@ function toNetworkDriveRequest(form: DriveForm) {
     remotePath: form.remotePath,
     webdavVendor: form.webdavVendor,
     cacheMode: form.cacheMode,
+    autoMount: form.autoMount,
   };
 }
 

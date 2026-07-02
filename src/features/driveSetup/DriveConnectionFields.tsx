@@ -1,4 +1,4 @@
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, RefreshCw } from "lucide-react";
 import { FieldActionButton, FieldGrid, SelectInput, TextInput } from "./FormControls";
 import { ProtocolHint } from "./ProtocolSetup";
 import type { CacheMode, DriveForm, ProtocolDefinition } from "./model";
@@ -151,7 +151,62 @@ export function DriveConnectionFields({
           options={cacheOptions}
         />
       </FieldGrid>
+
+      <MountBehaviorToggle
+        id={`${idPrefix}-auto-mount`}
+        enabled={form.autoMount}
+        onChange={(autoMount) => onChange({ autoMount })}
+      />
     </>
+  );
+}
+
+function MountBehaviorToggle({
+  id,
+  enabled,
+  onChange,
+}: {
+  id: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <label
+      className={`grid min-h-[42px] cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border px-2.5 py-2 transition-colors ${
+        enabled
+          ? "border-[rgba(117,215,180,0.36)] bg-[rgba(117,215,180,0.07)]"
+          : "border-[var(--line)] bg-[#12181d]"
+      }`}
+      htmlFor={id}
+    >
+      <RefreshCw size={15} className={enabled ? "text-[var(--accent)]" : "text-[var(--muted-strong)]"} />
+      <span className="min-w-0">
+        <strong className="block truncate text-xs font-bold text-[var(--ink-strong)]">Restore on launch</strong>
+        <small className="mt-0.5 block text-[11px] text-[var(--muted)]">
+          {enabled ? "Automatic" : "Manual"}
+        </small>
+      </span>
+      <span
+        className={`relative h-[22px] w-[38px] rounded-full border transition-colors ${
+          enabled
+            ? "border-[rgba(117,215,180,0.52)] bg-[rgba(117,215,180,0.28)]"
+            : "border-[var(--line)] bg-[#0f151a]"
+        }`}
+      >
+        <span
+          className={`absolute top-1/2 size-[16px] -translate-y-1/2 rounded-full bg-[var(--ink-strong)] transition-transform ${
+            enabled ? "translate-x-[18px]" : "translate-x-[3px]"
+          }`}
+        />
+      </span>
+      <input
+        checked={enabled}
+        className="sr-only"
+        id={id}
+        type="checkbox"
+        onChange={(event) => onChange(event.currentTarget.checked)}
+      />
+    </label>
   );
 }
 

@@ -112,6 +112,7 @@ struct NetworkDriveRequest {
     remote_path: Option<String>,
     webdav_vendor: Option<String>,
     cache_mode: Option<String>,
+    auto_mount: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -1258,6 +1259,7 @@ fn apply_request_to_drive(
     drive.domain = optional_text(&request.domain);
     drive.share = optional_text(&request.share);
     drive.webdav_vendor = optional_text(&request.webdav_vendor);
+    drive.auto_mount = request.auto_mount.unwrap_or(drive.auto_mount);
     drive.last_mount_state = Some("ready".to_string());
     drive.last_issue_summary = None;
     drive.last_issue_recommendation = None;
@@ -1692,7 +1694,7 @@ fn create_network_drive(
             mount_point: mount_point.clone(),
             remote_path: optional_text(&request.remote_path).unwrap_or_default(),
             cache_mode: cache_mode.clone(),
-            auto_mount: true,
+            auto_mount: request.auto_mount.unwrap_or_else(default_auto_mount),
             url: optional_text(&request.url),
             host: optional_text(&request.host),
             port: optional_text(&request.port),

@@ -6,6 +6,7 @@ import {
   FolderOpen,
   HardDrive,
   KeyRound,
+  RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -153,6 +154,12 @@ function setupSteps(
       state: mountTone === "good" ? "ready" : "warning",
       value: environmentValue(environment.state),
       title: `${environment.summary}\n${environment.recommendation}`,
+    },
+    {
+      icon: RefreshCw,
+      label: "Launch restore",
+      state: form.autoMount ? "ready" : "neutral",
+      value: form.autoMount ? "On launch" : "Manual",
     },
     {
       icon: Database,
