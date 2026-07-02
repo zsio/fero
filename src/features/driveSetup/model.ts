@@ -17,6 +17,15 @@ export type MountPointSuggestion = {
   path: string;
 };
 
+export type MountEnvironment = {
+  platform: string;
+  requirement: string;
+  state: "ready" | "needsSetup" | "limited" | "unknown" | string;
+  summary: string;
+  recommendation: string;
+  detectedPaths: string[];
+};
+
 export type DriveForm = {
   protocol: ProtocolId;
   displayName: string;
@@ -216,6 +225,19 @@ export function cacheLabelFromString(mode: string) {
   if (mode === "off") return "No cache";
   if (mode === "smart") return "Smart cache";
   return mode || "Smart cache";
+}
+
+export function environmentValue(state: string) {
+  if (state === "ready") return "Ready";
+  if (state === "needsSetup") return "Needs setup";
+  if (state === "limited") return "Limited";
+  return "Unknown";
+}
+
+export function environmentTone(state: string): "good" | "warning" | "muted" {
+  if (state === "ready") return "good";
+  if (state === "needsSetup" || state === "limited") return "warning";
+  return "muted";
 }
 
 export function shortPath(value: string) {

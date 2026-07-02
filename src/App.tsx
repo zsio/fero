@@ -28,12 +28,15 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
 import { ProtocolHint, ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
 import {
   cacheLabelFromString,
   canSaveDriveForm,
   canTestDriveForm,
+  environmentTone,
+  environmentValue,
   makeDefaultForm,
   normalizeCacheMode,
   normalizeProtocolId,
@@ -43,6 +46,7 @@ import {
 import type {
   CacheMode,
   DriveForm,
+  MountEnvironment,
   MountPointSuggestion,
   NetworkDriveTestResult,
   ProtocolId,
@@ -76,15 +80,6 @@ type AppOverview = {
   daemon: DaemonStatus;
   mountEnvironment: MountEnvironment;
   drives: SavedDrive[];
-};
-
-type MountEnvironment = {
-  platform: string;
-  requirement: string;
-  state: "ready" | "needsSetup" | "limited" | "unknown" | string;
-  summary: string;
-  recommendation: string;
-  detectedPaths: string[];
 };
 
 type MountSession = {
@@ -1075,31 +1070,6 @@ function App() {
   );
 }
 
-function MountEnvironmentPanel({ environment }: { environment: MountEnvironment }) {
-  const ready = environment.state === "ready";
-  const warning = environment.state === "needsSetup" || environment.state === "limited";
-  const Icon = ready ? ShieldCheck : warning ? AlertTriangle : Settings;
-  const pathLabel =
-    environment.detectedPaths.length > 0
-      ? shortPath(environment.detectedPaths[0])
-      : environment.requirement;
-
-  return (
-    <div className={`mount-environment mount-environment-${environmentTone(environment.state)}`}>
-      <div className="mount-environment-icon">
-        <Icon size={16} />
-      </div>
-      <div>
-        <strong>{environment.summary}</strong>
-        <span>{environment.recommendation}</span>
-      </div>
-      <small title={environment.detectedPaths.join("\n") || environment.requirement}>
-        {environment.platform} · {pathLabel}
-      </small>
-    </div>
-  );
-}
-
 function ToolbarButton({
   icon: Icon,
   children,
@@ -1813,19 +1783,6 @@ function stringField(record: Record<string, JsonValue>, keys: string[]) {
     if (typeof value === "string" && value.trim()) return value;
   }
   return null;
-}
-
-function environmentValue(state: string) {
-  if (state === "ready") return "Ready";
-  if (state === "needsSetup") return "Needs setup";
-  if (state === "limited") return "Limited";
-  return "Unknown";
-}
-
-function environmentTone(state: string): "good" | "warning" | "muted" {
-  if (state === "ready") return "good";
-  if (state === "needsSetup" || state === "limited") return "warning";
-  return "muted";
 }
 
 function activityTone(level: string) {
