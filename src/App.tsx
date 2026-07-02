@@ -28,10 +28,12 @@ import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
 import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
+import { DriveConnectionFields } from "./features/driveSetup/DriveConnectionFields";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import { TextInput } from "./features/driveSetup/FormControls";
 import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
-import { ProtocolHint, ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
+import { ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
 import {
   cacheLabelFromString,
   canSaveDriveForm,
@@ -45,7 +47,6 @@ import {
   shortPath,
 } from "./features/driveSetup/model";
 import type {
-  CacheMode,
   DriveForm,
   MountEnvironment,
   MountPointSuggestion,
@@ -852,113 +853,18 @@ function App() {
                   onUse={() => void useRecommendedMountPoint()}
                 />
 
-                {drive.protocol === "webdav" ? (
-                  <TextInput
-                    label="WebDAV address"
-                    value={drive.url}
-                    onChange={(value) => setDrive((current) => ({ ...current, url: value }))}
-                    placeholder="https://cloud.example.com/remote.php/dav/files/me/"
-                  />
-                ) : (
-                  <div className="form-grid two">
-                    <TextInput
-                      label="Server"
-                      value={drive.host}
-                      onChange={(value) => setDrive((current) => ({ ...current, host: value }))}
-                      placeholder={drive.protocol === "smb" ? "NAS.local" : "files.example.com"}
-                    />
-                    <TextInput
-                      label="Port"
-                      value={drive.port}
-                      onChange={(value) => setDrive((current) => ({ ...current, port: value }))}
-                      placeholder={selectedProtocol.defaultPort || "default"}
-                    />
-                  </div>
-                )}
-
-                {drive.protocol === "smb" && (
-                  <div className="form-grid two">
-                    <TextInput
-                      label="Share name"
-                      value={drive.share}
-                      onChange={(value) => setDrive((current) => ({ ...current, share: value }))}
-                      placeholder="Media"
-                    />
-                    <TextInput
-                      label="Domain"
-                      value={drive.domain}
-                      onChange={(value) => setDrive((current) => ({ ...current, domain: value }))}
-                      placeholder="optional"
-                    />
-                  </div>
-                )}
-
-                <div className="form-grid two">
-                  <TextInput
-                    label="Username"
-                    value={drive.username}
-                    onChange={(value) => setDrive((current) => ({ ...current, username: value }))}
-                    placeholder="optional"
-                  />
-                  <TextInput
-                    label="Password"
-                    type="password"
-                    value={drive.password}
-                    onChange={(value) => setDrive((current) => ({ ...current, password: value }))}
-                    placeholder="optional"
-                  />
-                </div>
-
-                <TextInput
-                  label="Remote folder"
-                  value={drive.remotePath}
-                  onChange={(value) => setDrive((current) => ({ ...current, remotePath: value }))}
-                  placeholder={drive.protocol === "smb" ? "optional subfolder" : "/"}
-                />
-
-                <TextInput
-                  label="Local folder"
-                  value={drive.mountPoint}
-                  onChange={(value) => {
+                <DriveConnectionFields
+                  form={drive}
+                  protocol={selectedProtocol}
+                  idPrefix="create-drive"
+                  mountPointPlaceholder={mountPointSuggestion?.path ?? "Choose folder"}
+                  onChange={(patch) => setDrive((current) => ({ ...current, ...patch }))}
+                  onMountPointChange={(value) => {
                     setMountPointCustom(true);
                     setDrive((current) => ({ ...current, mountPoint: value }));
                   }}
-                  placeholder={mountPointSuggestion?.path ?? "Choose folder"}
-                  action={
-                    <button className="field-action" type="button" onClick={() => void chooseLocalFolder()}>
-                      <FolderOpen size={14} />
-                      <span>Browse</span>
-                    </button>
-                  }
+                  onBrowse={() => void chooseLocalFolder()}
                 />
-
-                <div className="form-grid two">
-                  {drive.protocol === "webdav" ? (
-                    <SelectInput
-                      label="WebDAV type"
-                      value={drive.webdavVendor}
-                      onChange={(value) => setDrive((current) => ({ ...current, webdavVendor: value }))}
-                      options={[
-                        { value: "other", label: "Generic WebDAV" },
-                        { value: "nextcloud", label: "Nextcloud" },
-                        { value: "owncloud", label: "ownCloud" },
-                        { value: "sharepoint", label: "SharePoint" },
-                      ]}
-                    />
-                  ) : (
-                    <ProtocolHint protocol={selectedProtocol} />
-                  )}
-                  <SelectInput
-                    label="Cache"
-                    value={drive.cacheMode}
-                    onChange={(value) => setDrive((current) => ({ ...current, cacheMode: value as CacheMode }))}
-                    options={[
-                      { value: "smart", label: "Smart cache" },
-                      { value: "full", label: "Full cache" },
-                      { value: "off", label: "No cache" },
-                    ]}
-                  />
-                </div>
 
                 {connectionTest && <ConnectionTestPanel result={connectionTest} />}
 
@@ -1146,96 +1052,23 @@ function EditDriveSettings({
       </div>
 
       <TextInput
+        id="edit-drive-name"
         label="Drive name"
         value={form.displayName}
         onChange={(value) => onChange({ displayName: value })}
         placeholder={protocol.defaultName}
       />
 
-      {form.protocol === "webdav" ? (
-        <TextInput
-          label="WebDAV address"
-          value={form.url}
-          onChange={(value) => onChange({ url: value })}
-          placeholder="https://cloud.example.com/remote.php/dav/files/me/"
-        />
-      ) : (
-        <div className="form-grid two">
-          <TextInput
-            label="Server"
-            value={form.host}
-            onChange={(value) => onChange({ host: value })}
-            placeholder={form.protocol === "smb" ? "NAS.local" : "files.example.com"}
-          />
-          <TextInput
-            label="Port"
-            value={form.port}
-            onChange={(value) => onChange({ port: value })}
-            placeholder={protocol.defaultPort || "default"}
-          />
-        </div>
-      )}
-
-      {form.protocol === "smb" && (
-        <div className="form-grid two">
-          <TextInput label="Share name" value={form.share} onChange={(value) => onChange({ share: value })} placeholder="Media" />
-          <TextInput label="Domain" value={form.domain} onChange={(value) => onChange({ domain: value })} placeholder="optional" />
-        </div>
-      )}
-
-      <div className="form-grid two">
-        <TextInput label="Username" value={form.username} onChange={(value) => onChange({ username: value })} placeholder="optional" />
-        <TextInput label="Password" type="password" value={form.password} onChange={(value) => onChange({ password: value })} placeholder="keep current" />
-      </div>
-
-      <div className="form-grid two">
-        <TextInput
-          label="Remote folder"
-          value={form.remotePath}
-          onChange={(value) => onChange({ remotePath: value })}
-          placeholder={form.protocol === "smb" ? "optional subfolder" : "/"}
-        />
-        <TextInput
-          label="Local folder"
-          value={form.mountPoint}
-          onChange={(value) => onChange({ mountPoint: value })}
-          placeholder="Choose folder"
-          action={
-            <button className="field-action" type="button" onClick={onBrowse}>
-              <FolderOpen size={14} />
-              <span>Browse</span>
-            </button>
-          }
-        />
-      </div>
-
-      <div className="form-grid two">
-        {form.protocol === "webdav" ? (
-          <SelectInput
-            label="WebDAV type"
-            value={form.webdavVendor}
-            onChange={(value) => onChange({ webdavVendor: value })}
-            options={[
-              { value: "other", label: "Generic WebDAV" },
-              { value: "nextcloud", label: "Nextcloud" },
-              { value: "owncloud", label: "ownCloud" },
-              { value: "sharepoint", label: "SharePoint" },
-            ]}
-          />
-        ) : (
-          <ProtocolHint protocol={protocol} />
-        )}
-        <SelectInput
-          label="Cache"
-          value={form.cacheMode}
-          onChange={(value) => onChange({ cacheMode: value as CacheMode })}
-          options={[
-            { value: "smart", label: "Smart cache" },
-            { value: "full", label: "Full cache" },
-            { value: "off", label: "No cache" },
-          ]}
-        />
-      </div>
+      <DriveConnectionFields
+        form={form}
+        protocol={protocol}
+        idPrefix="edit-drive"
+        mountPointPlaceholder="Choose folder"
+        passwordPlaceholder="keep current"
+        localFolderLayout="paired"
+        onChange={onChange}
+        onBrowse={onBrowse}
+      />
 
       {connectionTest && <ConnectionTestPanel result={connectionTest} />}
 
@@ -1255,61 +1088,6 @@ function EditDriveSettings({
         <span>Cancel</span>
       </button>
     </form>
-  );
-}
-
-function TextInput({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  action,
-}: {
-  id?: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  type?: "text" | "password";
-  action?: ReactNode;
-}) {
-  const inputId = id ?? `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-  return (
-    <div className="field">
-      <label htmlFor={inputId}>{label}</label>
-      <div className={action ? "input-with-action" : ""}>
-        <input id={inputId} type={type} value={value} onChange={(event) => onChange(event.currentTarget.value)} placeholder={placeholder} />
-        {action}
-      </div>
-    </div>
-  );
-}
-
-function SelectInput({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  const inputId = `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-  return (
-    <div className="field">
-      <label htmlFor={inputId}>{label}</label>
-      <select id={inputId} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
   );
 }
 
