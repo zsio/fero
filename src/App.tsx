@@ -51,6 +51,8 @@ import type {
   NetworkDriveTestResult,
   ProtocolId,
 } from "./features/driveSetup/model";
+import { DriveRow } from "./features/driveLibrary/DriveRow";
+import type { DriveRowView } from "./features/driveLibrary/DriveRow";
 import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import "./styles/index.css";
 
@@ -828,9 +830,9 @@ function App() {
             <div className="drive-list">
               {driveItems.length > 0 ? (
                 driveItems.map((item) => (
-                  <MountRow
+                  <DriveRow
                     key={item.id}
-                    drive={item}
+                    drive={driveRowView(item)}
                     selected={selectedDrive?.id === item.id}
                     onSelect={() => setSelectedDriveId(item.id)}
                   />
@@ -1125,29 +1127,6 @@ function PaneHeader({ title, meta, icon: Icon }: { title: string; meta: string; 
       </div>
       <span>{meta}</span>
     </div>
-  );
-}
-
-function MountRow({ drive, selected, onSelect }: { drive: DriveListItem; selected: boolean; onSelect: () => void }) {
-  const Icon = protocolIcon(drive.protocol);
-  return (
-    <button className={`mount-row ${selected ? "mount-row-selected" : ""}`} type="button" onClick={onSelect}>
-      <div className="mount-row-icon">
-        <Icon size={18} />
-      </div>
-      <div className="mount-row-main">
-        <div className="mount-row-top">
-          <strong>{drive.displayName}</strong>
-          <span className={`health-pill health-pill-${drive.health}`}>{drive.status}</span>
-        </div>
-        <div className="mount-row-meta">
-          <span>{protocolLabel(drive.protocol)}</span>
-          <span>{driveEndpointLabel(drive)}</span>
-          <span>{drive.mountPoint}</span>
-          <span>{cacheLabelFromString(drive.cacheMode)}</span>
-        </div>
-      </div>
-    </button>
   );
 }
 
@@ -1771,6 +1750,19 @@ function protocolLabel(protocol: string) {
 function protocolIcon(protocol: string): LucideIcon {
   const match = protocols.find((item) => item.id === protocol.toLowerCase());
   return match?.icon ?? HardDrive;
+}
+
+function driveRowView(drive: DriveListItem): DriveRowView {
+  return {
+    displayName: drive.displayName,
+    status: drive.status,
+    health: drive.health,
+    icon: protocolIcon(drive.protocol),
+    protocolLabel: protocolLabel(drive.protocol),
+    endpointLabel: driveEndpointLabel(drive),
+    mountPoint: drive.mountPoint,
+    cacheLabel: cacheLabelFromString(drive.cacheMode),
+  };
 }
 
 function driveEndpointLabel(drive: DriveListItem) {
