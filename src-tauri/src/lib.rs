@@ -957,6 +957,7 @@ fn protocol_parameters(
         "smb" => {
             let host = optional_text(&request.host).ok_or("SMB server address is required")?;
             params.insert("host".to_string(), Value::String(host));
+            push_param(&mut params, "port", optional_text(&request.port));
             push_param(&mut params, "user", optional_text(&request.username));
             push_param(&mut params, "pass", optional_text(&request.password));
             push_param(&mut params, "domain", optional_text(&request.domain));

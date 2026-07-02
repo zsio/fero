@@ -61,7 +61,7 @@ export function DriveConnectionFields({
           id={`${idPrefix}-webdav-url`}
           label="WebDAV address"
           value={form.url}
-          onChange={(value) => onChange({ url: value })}
+          onChange={(value) => onChange(endpointPatchFromInput(form, value))}
           placeholder="https://cloud.example.com/remote.php/dav/files/me/"
         />
       ) : (
@@ -70,8 +70,8 @@ export function DriveConnectionFields({
             id={`${idPrefix}-host`}
             label="Server"
             value={form.host}
-            onChange={(value) => onChange({ host: value })}
-            placeholder={form.protocol === "smb" ? "NAS.local" : "files.example.com"}
+            onChange={(value) => onChange(endpointPatchFromInput(form, value))}
+            placeholder={form.protocol === "smb" ? "//NAS/Media" : `${form.protocol}://files.example.com/folder`}
           />
           <TextInput
             id={`${idPrefix}-port`}
@@ -175,6 +175,124 @@ export function DriveConnectionFields({
       </FieldGrid>
     </>
   );
+}
+
+function endpointPatchFromInput(form: DriveForm, value: string): Partial<DriveForm> {
+  if (form.protocol === "webdav") return webdavPatchFromInput(value);
+  if (form.protocol === "smb") return smbPatchFromInput(value) ?? { host: value };
+  if (form.protocol === "ftp" || form.protocol === "sftp") {
+    return urlPatchFromInput(form, value) ?? { host: value };
+  }
+  return { host: value };
+}
+
+function webdavPatchFromInput(value: string): Partial<DriveForm> {
+  const trimmed = value.trim();
+  if (!trimmed) return { url: value };
+
+  try {
+    const url = new URL(trimmed);
+    const patch: Partial<DriveForm> = {};
+    if (url.username) patch.username = decodeUrlPart(url.username);
+    if (url.password) patch.password = decodeUrlPart(url.password);
+
+    if (url.username || url.password) {
+      url.username = "";
+      url.password = "";
+      patch.url = url.toString();
+    } else {
+      patch.url = value;
+    }
+
+    return Object.keys(patch).length > 0 ? patch : { url: value };
+  } catch {
+    return { url: value };
+  }
+}
+
+function urlPatchFromInput(form: DriveForm, value: string): Partial<DriveForm> | null {
+  const trimmed = value.trim();
+  if (!trimmed || !trimmed.toLowerCase().startsWith(`${form.protocol}://`)) return null;
+
+  try {
+    const url = new URL(trimmed);
+    const path = cleanRemotePath(url.pathname);
+    const patch: Partial<DriveForm> = {
+      host: url.hostname,
+    };
+
+    if (url.port) patch.port = url.port;
+    if (url.username) patch.username = decodeUrlPart(url.username);
+    if (url.password) patch.password = decodeUrlPart(url.password);
+    if (path) patch.remotePath = path;
+
+    return patch;
+  } catch {
+    return null;
+  }
+}
+
+function smbPatchFromInput(value: string): Partial<DriveForm> | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.toLowerCase().startsWith("smb://")) {
+    return smbPatchFromUrl(trimmed);
+  }
+
+  const normalized = trimmed.replace(/\\/g, "/");
+  if (!normalized.startsWith("//") && !/^[^/]+\/[^/]+/.test(normalized)) return null;
+
+  const parts = normalized.replace(/^\/+/, "").split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+
+  const { host, port } = splitHostPort(parts[0]);
+  const patch: Partial<DriveForm> = { host };
+  if (port) patch.port = port;
+  if (parts[1]) patch.share = parts[1];
+  if (parts.length > 2) patch.remotePath = parts.slice(2).join("/");
+  return patch;
+}
+
+function smbPatchFromUrl(value: string): Partial<DriveForm> | null {
+  try {
+    const url = new URL(value);
+    const segments = cleanRemotePath(url.pathname).split("/").filter(Boolean);
+    const patch: Partial<DriveForm> = {
+      host: url.hostname,
+    };
+
+    if (url.port) patch.port = url.port;
+    if (url.username) patch.username = decodeUrlPart(url.username);
+    if (url.password) patch.password = decodeUrlPart(url.password);
+    if (segments[0]) patch.share = segments[0];
+    if (segments.length > 1) patch.remotePath = segments.slice(1).join("/");
+    return patch;
+  } catch {
+    return null;
+  }
+}
+
+function cleanRemotePath(pathname: string) {
+  return pathname
+    .split("/")
+    .filter(Boolean)
+    .map(decodeUrlPart)
+    .join("/");
+}
+
+function splitHostPort(value: string) {
+  const match = value.match(/^(.+):(\d+)$/);
+  if (!match) return { host: value, port: "" };
+  return { host: match[1], port: match[2] };
+}
+
+function decodeUrlPart(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function MountBehaviorToggle({
