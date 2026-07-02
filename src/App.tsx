@@ -10,7 +10,6 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
-  Loader2,
   Pencil,
   Play,
   Plus,
@@ -30,7 +29,7 @@ import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/m
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveConnectionFields } from "./features/driveSetup/DriveConnectionFields";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
-import { TextInput } from "./features/driveSetup/FormControls";
+import { DriveSetupForm, FormActionRow, FormButton, ProtocolSummaryLine, TextInput } from "./features/driveSetup/FormControls";
 import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
 import { ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
@@ -831,13 +830,7 @@ function App() {
                 suggestion={mountPointSuggestion}
               />
 
-              <form
-                className="drive-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void createNetworkDrive();
-                }}
-              >
+              <DriveSetupForm onSubmit={() => void createNetworkDrive()}>
                 <TextInput
                   id="drive-name"
                   label="Drive name"
@@ -868,17 +861,27 @@ function App() {
 
                 {connectionTest && <ConnectionTestPanel result={connectionTest} />}
 
-                <div className="form-actions">
-                  <button className="secondary-button test-button" type="button" disabled={busy || !canTestDrive} onClick={() => void testConnection()}>
-                    {testingConnection ? <Loader2 className="spin" size={16} /> : <Wifi size={16} />}
-                    <span>{testingConnection ? "Testing" : "Test connection"}</span>
-                  </button>
-                  <button className="submit-button" type="submit" disabled={busy || !canCreateDrive}>
-                    {busy && !testingConnection ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                    <span>Connect and mount</span>
-                  </button>
-                </div>
-              </form>
+                <FormActionRow>
+                  <FormButton
+                    icon={Wifi}
+                    loading={testingConnection}
+                    type="button"
+                    disabled={busy || !canTestDrive}
+                    onClick={() => void testConnection()}
+                  >
+                    {testingConnection ? "Testing" : "Test connection"}
+                  </FormButton>
+                  <FormButton
+                    icon={Play}
+                    loading={busy && !testingConnection}
+                    variant="primary"
+                    type="submit"
+                    disabled={busy || !canCreateDrive}
+                  >
+                    Connect and mount
+                  </FormButton>
+                </FormActionRow>
+              </DriveSetupForm>
             </section>
 
             <section className="pane-section">
@@ -1039,17 +1042,8 @@ function EditDriveSettings({
   const protocol = protocols.find((item) => item.id === form.protocol) ?? protocols[0];
   const ProtocolIcon = protocol.icon;
   return (
-    <form
-      className="edit-drive-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSave();
-      }}
-    >
-      <div className="edit-protocol-line">
-        <ProtocolIcon size={15} />
-        <span>{protocol.label}</span>
-      </div>
+    <DriveSetupForm variant="edit" onSubmit={onSave}>
+      <ProtocolSummaryLine icon={ProtocolIcon} label={protocol.label} />
 
       <TextInput
         id="edit-drive-name"
@@ -1072,22 +1066,19 @@ function EditDriveSettings({
 
       {connectionTest && <ConnectionTestPanel result={connectionTest} />}
 
-      <div className="form-actions edit-form-actions">
-        <button className="secondary-button test-button" type="button" disabled={busy || !canTest} onClick={onTest}>
-          {testingConnection ? <Loader2 className="spin" size={16} /> : <Wifi size={16} />}
-          <span>{testingConnection ? "Testing" : "Test connection"}</span>
-        </button>
-        <button className="submit-button" type="submit" disabled={busy || !canSave}>
-          {busy && !testingConnection ? <Loader2 className="spin" size={16} /> : <Pencil size={16} />}
-          <span>Save changes</span>
-        </button>
-      </div>
+      <FormActionRow variant="edit">
+        <FormButton icon={Wifi} loading={testingConnection} type="button" disabled={busy || !canTest} onClick={onTest}>
+          {testingConnection ? "Testing" : "Test connection"}
+        </FormButton>
+        <FormButton icon={Pencil} loading={busy && !testingConnection} variant="primary" type="submit" disabled={busy || !canSave}>
+          Save changes
+        </FormButton>
+      </FormActionRow>
 
-      <button className="secondary-button cancel-edit-button" type="button" disabled={busy} onClick={onCancel}>
-        <XCircle size={15} />
-        <span>Cancel</span>
-      </button>
-    </form>
+      <FormButton icon={XCircle} type="button" disabled={busy} fullWidth onClick={onCancel}>
+        Cancel
+      </FormButton>
+    </DriveSetupForm>
   );
 }
 
