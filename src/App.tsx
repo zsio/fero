@@ -13,10 +13,7 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Settings,
   ShieldCheck,
-  Square,
-  Terminal,
   Wifi,
   XCircle,
 } from "lucide-react";
@@ -24,6 +21,7 @@ import type { LucideIcon } from "lucide-react";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
 import { AppShell, WorkspaceSurface } from "./features/appLayout/AppLayout";
+import { AppSidebar } from "./features/appLayout/AppSidebar";
 import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
@@ -57,11 +55,18 @@ import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import { MountDetails } from "./features/driveLibrary/MountDetails";
 import type { MountDetailsDrive } from "./features/driveLibrary/MountDetails";
 import {
+  DetailPane,
+  DiagnosticOutput,
+  DiagnosticsToggle,
+  DriveListRegion,
+  DrivePane,
+  ErrorBanner,
   PaneHeader,
-  PathLine,
+  PaneSection,
   StatusStrip,
   StatusTile,
   ToolbarButton,
+  WorkspaceGrid,
   WorkspaceHeader,
 } from "./features/workspace/WorkspaceChrome";
 import "./styles/index.css";
@@ -688,87 +693,18 @@ function App() {
 
   return (
     <AppShell>
-      <aside className="sidebar" aria-label="Fero navigation">
-        <div className="brand">
-          <div className="brand-mark">
-            <HardDrive size={20} strokeWidth={2.2} />
-          </div>
-          <div>
-            <h1>Fero</h1>
-            <p>Network drives</p>
-          </div>
-        </div>
-
-        <nav className="side-nav" aria-label="Workspace">
-          <button className="side-nav-item side-nav-item-active" type="button">
-            <HardDrive size={17} />
-            <span>Drives</span>
-          </button>
-          <button className="side-nav-item" type="button" onClick={focusActivityPanel}>
-            <Activity size={17} />
-            <span>Activity</span>
-          </button>
-          <button className="side-nav-item" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
-            <Settings size={17} />
-            <span>Diagnostics</span>
-          </button>
-        </nav>
-
-        <section className={`service-card ${daemonRunning ? "service-card-online" : ""}`}>
-          <div className="service-state">
-            <StatusDot active={daemonRunning || restoring} />
-            <div>
-              <strong>{restoring ? "Restoring drives" : daemonRunning ? "Service running" : "Service standby"}</strong>
-              <span>
-                {restoring
-                  ? "Checking saved drives for launch restore"
-                  : daemonRunning
-                    ? "Ready to mount drives"
-                    : "Starts automatically when needed"}
-              </span>
-            </div>
-          </div>
-          {(restoring || (restoreResult && restoreResult.attempted > 0)) && (
-            <div className={`restore-note ${restoreFailures > 0 ? "restore-note-warning" : ""}`}>
-              {restoring
-                ? "Restoring saved drives..."
-                : restoreFailures > 0
-                  ? `${restoreFailures} drive${restoreFailures === 1 ? "" : "s"} need attention`
-                  : `${restoreResult?.mounted ?? 0}/${restoreResult?.attempted ?? 0} restored on launch`}
-            </div>
-          )}
-          <details className="service-advanced">
-            <summary>
-              <Settings size={14} />
-              <span>Engine controls</span>
-            </summary>
-            <div className="service-actions">
-              <ToolbarButton
-                icon={Play}
-                variant="primary"
-                disabled={busy || daemonRunning}
-                onClick={() => void runAction(() => invoke("start_rclone"), { refreshMounts: true })}
-              >
-                Start
-              </ToolbarButton>
-              <ToolbarButton
-                icon={Square}
-                disabled={busy || !daemonRunning}
-                onClick={() => void runAction(() => invoke("stop_rclone"), { clearMounts: true })}
-              >
-                Stop
-              </ToolbarButton>
-            </div>
-          </details>
-        </section>
-
-        <div className="sidebar-foot">
-          <PathLine icon={FolderPlus} label="Mounts" value={overview.paths.defaultMountRoot} />
-          <PathLine icon={FolderOpen} label="Config" value={overview.paths.rcloneConfig} />
-          <PathLine icon={Database} label="Cache" value={overview.paths.rcloneCache} />
-          <PathLine icon={Terminal} label="Logs" value={overview.paths.rcloneLog} />
-        </div>
-      </aside>
+      <AppSidebar
+        paths={overview.paths}
+        daemonRunning={daemonRunning}
+        restoring={restoring}
+        restoreResult={restoreResult}
+        restoreFailures={restoreFailures}
+        busy={busy}
+        onShowActivity={focusActivityPanel}
+        onToggleDiagnostics={() => setDiagnosticsOpen((open) => !open)}
+        onStartService={() => void runAction(() => invoke("start_rclone"), { refreshMounts: true })}
+        onStopService={() => void runAction(() => invoke("stop_rclone"), { clearMounts: true })}
+      />
 
       <WorkspaceSurface>
         <WorkspaceHeader
@@ -785,12 +721,7 @@ function App() {
           </ToolbarButton>
         </WorkspaceHeader>
 
-        {error && (
-          <div className="error-banner" role="alert">
-            <AlertTriangle size={17} />
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <ErrorBanner message={error} />}
 
         <StatusStrip>
           <StatusTile icon={HardDrive} label="Drive library" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
@@ -801,10 +732,10 @@ function App() {
           <StatusTile icon={Database} label="Cache" value={cacheOverviewValue} tone={scannedCacheCount > 0 ? "default" : "muted"} />
         </StatusStrip>
 
-        <div className="home-grid">
-          <section className="drive-pane">
+        <WorkspaceGrid>
+          <DrivePane>
             <PaneHeader title="Network drives" meta={`${activeMounts.length} mounted`} icon={HardDrive} />
-            <div className="drive-list">
+            <DriveListRegion>
               {driveItems.length > 0 ? (
                 driveItems.map((item) => (
                   <DriveRow
@@ -817,11 +748,11 @@ function App() {
               ) : (
                 <EmptyDriveList daemonRunning={daemonRunning} onCreate={() => focusFirstCreateField()} />
               )}
-            </div>
-          </section>
+            </DriveListRegion>
+          </DrivePane>
 
-          <aside className="detail-pane">
-            <section className="pane-section create-pane">
+          <DetailPane>
+            <PaneSection className="flex-none">
               <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
               <DriveSetupStatus
@@ -883,9 +814,9 @@ function App() {
                   </FormButton>
                 </FormActionRow>
               </DriveSetupForm>
-            </section>
+            </PaneSection>
 
-            <section className="pane-section">
+            <PaneSection>
               <PaneHeader
                 title={isEditingSelectedDrive ? "Edit drive" : "Selected drive"}
                 meta={selectedDrive ? selectedDrive.status : "None selected"}
@@ -930,9 +861,9 @@ function App() {
                   onCreate={() => focusFirstCreateField()}
                 />
               )}
-            </section>
+            </PaneSection>
 
-            <section className={`pane-section diagnostics-section ${diagnosticsOpen ? "diagnostics-section-open" : ""}`}>
+            <PaneSection className="flex-none">
               <ActivityPanel
                 entries={activityLog}
                 busy={loadingActivity}
@@ -940,26 +871,14 @@ function App() {
                 onRefresh={() => void loadActivityLog(true)}
                 onOpenLog={() => void openLogFile()}
               />
-              <button className="diagnostics-toggle" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
-                <span>
-                  <Terminal size={16} />
-                  Advanced diagnostics
-                </span>
-                <small>{diagnosticsOpen ? "Hide" : "Show"}</small>
-              </button>
-              {diagnosticsOpen && (
-                <pre className="output">{output ? JSON.stringify(output, null, 2) : "No diagnostic output yet."}</pre>
-              )}
-            </section>
-          </aside>
-        </div>
+              <DiagnosticsToggle open={diagnosticsOpen} onClick={() => setDiagnosticsOpen((open) => !open)} />
+              {diagnosticsOpen && <DiagnosticOutput value={output ? JSON.stringify(output, null, 2) : "No diagnostic output yet."} />}
+            </PaneSection>
+          </DetailPane>
+        </WorkspaceGrid>
       </WorkspaceSurface>
     </AppShell>
   );
-}
-
-function StatusDot({ active }: { active: boolean }) {
-  return <span className={`status-dot ${active ? "status-dot-active" : ""}`} aria-hidden="true" />;
 }
 
 function EditDriveSettings({

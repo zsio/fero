@@ -1,0 +1,31 @@
+:root {
+  font-family:
+    "Avenir Next",
+    "Segoe UI",
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  color-scheme: dark;
+  --surface: #11161a;
+  --sidebar: #12181c;
+  --panel: #1a2026;
+  --panel-raised: #222a31;
+  --panel-soft: #151b20;
+  --line: #303a43;
+  --line-strong: #46535f;
+  --ink: #e8eef4;
+  --ink-strong: #fbfdff;
+  --muted: #8e9aa6;
+  --muted-strong: #b7c0ca;
+  --accent: #75d7b4;
+  --accent-ink: #061410;
+  --blue: #86b4ff;
+  --amber: #efc45a;
+  --danger: #ff837c;
+  --danger-soft: #321d20;
+  background: var(--surface);
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

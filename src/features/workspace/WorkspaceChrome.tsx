@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { AlertTriangle, Terminal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { shortPath } from "../driveSetup/model";
 
@@ -28,6 +29,20 @@ const statusToneClassNames = {
 } satisfies Record<StatusTone, string>;
 const paneHeaderClassName = "flex min-h-11 flex-none items-center justify-between gap-3 px-[14px] py-2.5";
 const paneHeaderTitleClassName = "flex min-w-0 items-center gap-2 text-[var(--accent)]";
+const errorBannerClassName =
+  "mt-[14px] flex flex-none items-center gap-2.5 rounded-lg border border-[rgba(255,131,124,0.48)] bg-[var(--danger-soft)] px-3 py-[11px] text-[13px] text-[#ffd4d1]";
+const workspaceGridClassName =
+  "grid min-h-0 flex-1 grid-cols-1 gap-[14px] min-[1181px]:grid-cols-[minmax(420px,1fr)_minmax(370px,460px)]";
+const drivePaneClassName =
+  "flex min-h-[360px] min-w-0 flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[rgba(26,32,38,0.86)] min-[1181px]:min-h-0";
+const detailPaneClassName =
+  "flex min-h-0 min-w-0 flex-col overflow-auto rounded-lg border border-[var(--line)] bg-[rgba(26,32,38,0.86)]";
+const driveListClassName = "grid min-h-[360px] content-start gap-px overflow-auto min-[1181px]:min-h-0";
+const paneSectionClassName = "border-t border-[var(--line)] first:border-t-0";
+const diagnosticsToggleClassName =
+  "flex min-h-12 w-full items-center justify-between border-0 bg-transparent px-[14px] py-3 text-sm font-bold text-[var(--ink-strong)]";
+const diagnosticOutputClassName =
+  "mx-[14px] mb-[14px] max-h-[220px] overflow-auto rounded-[7px] border border-[var(--line)] bg-[#0b1014] p-3 font-mono text-xs leading-[1.55] text-[#c9d5df]";
 
 export function ToolbarButton({
   icon: Icon,
@@ -129,4 +144,61 @@ export function PaneHeader({ title, meta, icon: Icon }: { title: string; meta: s
       <span className="shrink-0 text-xs text-[var(--muted)]">{meta}</span>
     </div>
   );
+}
+
+export function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className={errorBannerClassName} role="alert">
+      <AlertTriangle size={17} />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+export function WorkspaceGrid({ children }: { children: ReactNode }) {
+  return <div className={workspaceGridClassName}>{children}</div>;
+}
+
+export function DrivePane({ children }: { children: ReactNode }) {
+  return <section className={drivePaneClassName}>{children}</section>;
+}
+
+export function DetailPane({ children }: { children: ReactNode }) {
+  return <aside className={detailPaneClassName}>{children}</aside>;
+}
+
+export function DriveListRegion({ children }: { children: ReactNode }) {
+  return <div className={driveListClassName}>{children}</div>;
+}
+
+export function PaneSection({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <section className={`${paneSectionClassName} ${className}`}>{children}</section>;
+}
+
+export function DiagnosticsToggle({
+  open,
+  onClick,
+}: {
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button className={diagnosticsToggleClassName} type="button" onClick={onClick}>
+      <span className="flex items-center gap-2 text-[var(--accent)]">
+        <Terminal size={16} />
+        Advanced diagnostics
+      </span>
+      <small className="text-xs font-medium text-[var(--muted)]">{open ? "Hide" : "Show"}</small>
+    </button>
+  );
+}
+
+export function DiagnosticOutput({ value }: { value: string }) {
+  return <pre className={diagnosticOutputClassName}>{value}</pre>;
 }

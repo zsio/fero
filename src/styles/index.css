@@ -1,4 +1,4 @@
 @import "tailwindcss";
 
-/* Legacy CSS remains here while existing surfaces migrate to Tailwind utilities. */
-@import "./legacy.css";
+@import "./tokens.css";
+@import "./base.css";
