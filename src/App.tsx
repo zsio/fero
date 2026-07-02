@@ -53,6 +53,7 @@ import type {
 } from "./features/driveSetup/model";
 import { DriveRow } from "./features/driveLibrary/DriveRow";
 import type { DriveRowView } from "./features/driveLibrary/DriveRow";
+import { EmptyDriveDetails } from "./features/driveLibrary/EmptyDriveDetails";
 import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import "./styles/index.css";
 
@@ -1040,10 +1041,10 @@ function App() {
                   onClearCache={() => void clearDriveCache(selectedDrive)}
                 />
               ) : (
-                <div className="empty-detail">
-                  <XCircle size={18} />
-                  <span>Select a drive to see its local folder, protocol and cache status.</span>
-                </div>
+                <EmptyDriveDetails
+                  hasDrives={driveItems.length > 0}
+                  onCreate={() => focusFirstCreateField()}
+                />
               )}
             </section>
 

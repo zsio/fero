@@ -519,23 +519,6 @@ button:disabled {
   overflow: auto;
 }
 
-.empty-detail {
-  display: grid;
-  place-items: center;
-  min-height: 320px;
-  padding: 28px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.empty-detail span {
-  max-width: 360px;
-  margin-top: 7px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
 .create-pane {
   flex: none;
 }
