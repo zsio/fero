@@ -55,6 +55,7 @@ type AppOverview = {
     rcloneConfig: string;
     rcloneCache: string;
     defaultMountRoot: string;
+    activityLog: string;
     rcloneLog: string;
     driveCatalog: string;
   };
@@ -277,6 +278,7 @@ const emptyOverview: AppOverview = {
     rcloneConfig: "",
     rcloneCache: "",
     defaultMountRoot: "",
+    activityLog: "",
     rcloneLog: "",
     driveCatalog: "",
   },
@@ -325,20 +327,21 @@ function App() {
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
-  const autoRestoreCount = overview.drives.filter((item) => item.autoMount !== false).length;
   const restoreFailures = restoreResult?.items.filter((item) => item.status === "failed").length ?? 0;
   const attentionCount = overview.drives.filter((item) => Boolean(item.lastIssueSummary)).length;
   const mountEnvironmentTone = environmentTone(overview.mountEnvironment.state);
   const mountEnvironmentValue = environmentValue(overview.mountEnvironment.state);
-  const autoRestoreValue = restoring
-    ? "Restoring"
-    : autoRestoreCount > 0
-      ? `${autoRestoreCount} on launch`
-      : "Manual";
   const driveItems = useMemo(
     () => buildDriveList(overview.drives, activeMounts),
     [overview.drives, activeMounts],
   );
+  const mountedDriveCount = driveItems.filter((item) => item.mounted).length;
+  const readyDriveCount = driveItems.filter((item) => !item.mounted && item.health === "standby").length;
+  const scannedCacheStatuses = Object.values(cacheStatusByDrive);
+  const scannedCacheCount = scannedCacheStatuses.length;
+  const scannedCacheBytes = scannedCacheStatuses.reduce((total, status) => total + status.driveBytes, 0);
+  const cacheOverviewValue =
+    scannedCacheBytes > 0 ? formatBytes(scannedCacheBytes) : scannedCacheCount > 0 ? `${scannedCacheCount} scanned` : "Not scanned";
   const selectedDrive = useMemo(
     () => driveItems.find((item) => item.id === selectedDriveId) ?? driveItems[0] ?? null,
     [driveItems, selectedDriveId],
@@ -635,10 +638,14 @@ function App() {
   async function openLogFile() {
     setError(null);
     try {
-      await openPath(overview.paths.rcloneLog);
+      await openPath(overview.paths.activityLog || overview.paths.rcloneLog);
     } catch (err) {
       setError(errorMessage(err));
     }
+  }
+
+  function focusActivityPanel() {
+    document.querySelector(".activity-panel")?.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   function selectProtocol(protocol: ProtocolId) {
@@ -787,7 +794,7 @@ function App() {
             <HardDrive size={17} />
             <span>Drives</span>
           </button>
-          <button className="side-nav-item" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
+          <button className="side-nav-item" type="button" onClick={focusActivityPanel}>
             <Activity size={17} />
             <span>Activity</span>
           </button>
@@ -820,23 +827,29 @@ function App() {
                   : `${restoreResult?.mounted ?? 0}/${restoreResult?.attempted ?? 0} restored on launch`}
             </div>
           )}
-          <div className="service-actions">
-            <ToolbarButton
-              icon={Play}
-              variant="primary"
-              disabled={busy || daemonRunning}
-              onClick={() => void runAction(() => invoke("start_rclone"), { refreshMounts: true })}
-            >
-              Start
-            </ToolbarButton>
-            <ToolbarButton
-              icon={Square}
-              disabled={busy || !daemonRunning}
-              onClick={() => void runAction(() => invoke("stop_rclone"), { clearMounts: true })}
-            >
-              Stop
-            </ToolbarButton>
-          </div>
+          <details className="service-advanced">
+            <summary>
+              <Settings size={14} />
+              <span>Engine controls</span>
+            </summary>
+            <div className="service-actions">
+              <ToolbarButton
+                icon={Play}
+                variant="primary"
+                disabled={busy || daemonRunning}
+                onClick={() => void runAction(() => invoke("start_rclone"), { refreshMounts: true })}
+              >
+                Start
+              </ToolbarButton>
+              <ToolbarButton
+                icon={Square}
+                disabled={busy || !daemonRunning}
+                onClick={() => void runAction(() => invoke("stop_rclone"), { clearMounts: true })}
+              >
+                Stop
+              </ToolbarButton>
+            </div>
+          </details>
         </section>
 
         <div className="sidebar-foot">
@@ -852,10 +865,10 @@ function App() {
           <div>
             <div className="section-kicker">
               <Wifi size={14} />
-              <span>Local drive experience</span>
+              <span>Local drive workspace</span>
             </div>
-            <h2>Network drives</h2>
-            <p>Mount WebDAV, FTP, SFTP and SMB storage as local folders.</p>
+            <h2>Drives</h2>
+            <p>WebDAV, SFTP, FTP and SMB storage mounted into local folders.</p>
           </div>
 
           <div className="toolbar">
@@ -876,11 +889,12 @@ function App() {
         )}
 
         <section className="status-strip" aria-label="Overview">
-          <StatusTile icon={HardDrive} label="Saved drives" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
+          <StatusTile icon={HardDrive} label="Drive library" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
+          <StatusTile icon={FolderOpen} label="Mounted" value={`${mountedDriveCount}/${driveItems.length}`} tone={mountedDriveCount > 0 ? "good" : "muted"} />
+          <StatusTile icon={Play} label="Ready" value={String(readyDriveCount)} tone={readyDriveCount > 0 ? "good" : "muted"} />
           <StatusTile icon={AlertTriangle} label="Needs attention" value={String(attentionCount)} tone={attentionCount > 0 ? "warning" : "muted"} />
           <StatusTile icon={ShieldCheck} label="Mount system" value={mountEnvironmentValue} tone={mountEnvironmentTone} />
-          <StatusTile icon={Activity} label="Service" value={daemonRunning ? "Running" : "Auto-start"} tone={daemonRunning ? "good" : "muted"} />
-          <StatusTile icon={RefreshCw} label="Auto restore" value={autoRestoreValue} tone={autoRestoreCount > 0 ? "good" : "muted"} />
+          <StatusTile icon={Database} label="Cache" value={cacheOverviewValue} tone={scannedCacheCount > 0 ? "default" : "muted"} />
         </section>
 
         <div className="home-grid">
@@ -906,6 +920,7 @@ function App() {
             <section className="pane-section create-pane">
               <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
+              <SetupRail protocol={selectedProtocol} />
               <MountEnvironmentPanel environment={overview.mountEnvironment} />
 
               <form
@@ -1104,14 +1119,14 @@ function App() {
               <ActivityPanel
                 entries={activityLog}
                 busy={loadingActivity}
-                logPath={overview.paths.rcloneLog}
+                logPath={overview.paths.activityLog || overview.paths.rcloneLog}
                 onRefresh={() => void loadActivityLog(true)}
                 onOpenLog={() => void openLogFile()}
               />
               <button className="diagnostics-toggle" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
                 <span>
                   <Terminal size={16} />
-                  Diagnostics
+                  Advanced diagnostics
                 </span>
                 <small>{diagnosticsOpen ? "Hide" : "Show"}</small>
               </button>
@@ -1142,6 +1157,30 @@ function ProtocolPicker({ selected, onSelect }: { selected: ProtocolId; onSelect
             <Icon size={18} />
             <span>{protocol.label}</span>
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SetupRail({ protocol }: { protocol: ProtocolDefinition }) {
+  const ProtocolIcon = protocol.icon;
+  const steps = [
+    { icon: ProtocolIcon, label: protocol.label },
+    { icon: KeyRound, label: "Credentials" },
+    { icon: FolderOpen, label: "Local folder" },
+    { icon: Play, label: "Mount" },
+  ];
+
+  return (
+    <div className="setup-rail" aria-label="Drive setup path">
+      {steps.map((step) => {
+        const Icon = step.icon;
+        return (
+          <div key={step.label}>
+            <Icon size={14} />
+            <span>{step.label}</span>
+          </div>
         );
       })}
     </div>
@@ -1267,10 +1306,11 @@ function PaneHeader({ title, meta, icon: Icon }: { title: string; meta: string; 
 }
 
 function MountRow({ drive, selected, onSelect }: { drive: DriveListItem; selected: boolean; onSelect: () => void }) {
+  const Icon = protocolIcon(drive.protocol);
   return (
     <button className={`mount-row ${selected ? "mount-row-selected" : ""}`} type="button" onClick={onSelect}>
       <div className="mount-row-icon">
-        <HardDrive size={18} />
+        <Icon size={18} />
       </div>
       <div className="mount-row-main">
         <div className="mount-row-top">
@@ -1279,6 +1319,7 @@ function MountRow({ drive, selected, onSelect }: { drive: DriveListItem; selecte
         </div>
         <div className="mount-row-meta">
           <span>{protocolLabel(drive.protocol)}</span>
+          <span>{driveEndpointLabel(drive)}</span>
           <span>{drive.mountPoint}</span>
           <span>{cacheLabelFromString(drive.cacheMode)}</span>
         </div>
@@ -1299,6 +1340,17 @@ function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCr
           ? "Choose a protocol, enter your server details, and Fero will mount it as a local folder."
           : "Fero will start its mount service automatically when you connect a drive."}
       </span>
+      <div className="empty-protocols" aria-label="Supported protocols">
+        {protocols.map((protocol) => {
+          const Icon = protocol.icon;
+          return (
+            <span key={protocol.id}>
+              <Icon size={13} />
+              {protocol.label}
+            </span>
+          );
+        })}
+      </div>
       <button className="empty-action" type="button" onClick={onCreate}>
         <Plus size={16} />
         <span>Add network drive</span>
@@ -1508,7 +1560,7 @@ function MountDetails({
     <div className="mount-details">
       <DetailLine icon={HardDrive} label="Name" value={drive.displayName} />
       <DetailLine icon={FolderOpen} label="Local folder" value={drive.mountPoint} />
-      <DetailLine icon={Cloud} label="Remote" value={drive.remote} />
+      <DetailLine icon={Cloud} label="Remote" value={driveEndpointLabel(drive)} />
       <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
       <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
@@ -1647,7 +1699,7 @@ function ActivityPanel({
           <Activity size={16} />
           <strong>Recent activity</strong>
         </div>
-        <span>{entries.length > 0 ? `${entries.length} log lines` : "No logs yet"}</span>
+        <span>{entries.length > 0 ? `${entries.length} events` : "No activity"}</span>
       </div>
 
       {visibleEntries.length > 0 ? (
@@ -2004,6 +2056,23 @@ function protocolLabel(protocol: string) {
   return match?.label ?? protocol;
 }
 
+function protocolIcon(protocol: string): LucideIcon {
+  const match = protocols.find((item) => item.id === protocol.toLowerCase());
+  return match?.icon ?? HardDrive;
+}
+
+function driveEndpointLabel(drive: DriveListItem) {
+  const protocol = normalizeProtocolId(drive.protocol);
+  if (protocol === "webdav") return drive.url || drive.remote;
+  if (protocol === "smb") {
+    const share = [drive.host, drive.share].filter(Boolean).join("/");
+    return share || drive.remote;
+  }
+  const host = drive.host ? `${drive.host}${drive.port ? `:${drive.port}` : ""}` : "";
+  const remotePath = drive.remotePath ? `/${drive.remotePath.replace(/^\/+/, "")}` : "";
+  return host ? `${host}${remotePath}` : drive.remote;
+}
+
 function shortPath(value: string) {
   if (!value) return "not resolved";
   const normalized = value.replace(/\\/g, "/");
@@ -2060,6 +2129,7 @@ function formatRelativeTime(timestamp: number) {
 
 function formatActivityTime(value: string) {
   if (!value || value === "unknown time") return "unknown time";
+  if (/^\d+$/.test(value)) return formatRelativeTime(Number(value));
   const timestamp = Date.parse(value);
   if (!Number.isNaN(timestamp)) return formatRelativeTime(timestamp);
   return value;

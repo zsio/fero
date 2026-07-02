@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::{
+    fs::OpenOptions,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -68,6 +69,7 @@ struct AppPaths {
     rclone_log: String,
     rclone_cache: String,
     default_mount_root: String,
+    activity_log: String,
     drive_catalog: String,
 }
 
@@ -643,6 +645,7 @@ fn resolve_pathbufs(app: &AppHandle) -> Result<ResolvedPaths, String> {
         rclone_config: rclone_dir.join("rclone.conf"),
         rclone_cache,
         default_mount_root,
+        activity_log: log_dir.join("activity.jsonl"),
         rclone_log: log_dir.join("rclone.jsonl"),
         drive_catalog: config_dir.join("drives.json"),
     })
@@ -655,6 +658,7 @@ fn resolve_paths(app: &AppHandle) -> Result<AppPaths, String> {
         rclone_config: paths.rclone_config.display().to_string(),
         rclone_cache: paths.rclone_cache.display().to_string(),
         default_mount_root: paths.default_mount_root.display().to_string(),
+        activity_log: paths.activity_log.display().to_string(),
         rclone_log: paths.rclone_log.display().to_string(),
         drive_catalog: paths.drive_catalog.display().to_string(),
     })
@@ -771,7 +775,7 @@ fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn parse_activity_log_line(index: usize, line: &str) -> ActivityLogEntry {
+fn parse_activity_log_line(prefix: &str, index: usize, line: &str) -> ActivityLogEntry {
     match serde_json::from_str::<Value>(line) {
         Ok(value) => {
             let timestamp = text_field(&value, &["time", "Time", "timestamp", "Timestamp"])
@@ -790,7 +794,7 @@ fn parse_activity_log_line(index: usize, line: &str) -> ActivityLogEntry {
             .unwrap_or_else(|| line.to_string());
 
             ActivityLogEntry {
-                id: format!("{index}-{timestamp}"),
+                id: format!("{prefix}-{index}-{timestamp}"),
                 timestamp,
                 level,
                 source,
@@ -799,28 +803,27 @@ fn parse_activity_log_line(index: usize, line: &str) -> ActivityLogEntry {
             }
         }
         Err(_) => ActivityLogEntry {
-            id: format!("{index}-raw"),
+            id: format!("{prefix}-{index}-raw"),
             timestamp: "unknown time".to_string(),
             level: "info".to_string(),
-            source: "rclone".to_string(),
+            source: prefix.to_string(),
             message: line.to_string(),
             raw: line.to_string(),
         },
     }
 }
 
-fn read_recent_activity(app: &AppHandle, limit: usize) -> Result<Vec<ActivityLogEntry>, String> {
-    let paths = resolve_pathbufs(app)?;
-    if !paths.rclone_log.exists() {
+fn read_recent_activity_file(
+    path: &Path,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<ActivityLogEntry>, String> {
+    if !path.exists() {
         return Ok(Vec::new());
     }
 
-    let text = std::fs::read_to_string(&paths.rclone_log).map_err(|err| {
-        format!(
-            "failed to read activity log {}: {err}",
-            paths.rclone_log.display()
-        )
-    })?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|err| format!("failed to read activity log {}: {err}", path.display()))?;
     let lines = text
         .lines()
         .enumerate()
@@ -830,8 +833,61 @@ fn read_recent_activity(app: &AppHandle, limit: usize) -> Result<Vec<ActivityLog
     Ok(lines[start..]
         .iter()
         .rev()
-        .map(|(index, line)| parse_activity_log_line(*index, line))
+        .map(|(index, line)| parse_activity_log_line(prefix, *index, line))
         .collect())
+}
+
+fn activity_sort_key(entry: &ActivityLogEntry) -> u128 {
+    entry.timestamp.parse::<u128>().unwrap_or_default()
+}
+
+fn read_recent_activity(app: &AppHandle, limit: usize) -> Result<Vec<ActivityLogEntry>, String> {
+    let paths = resolve_pathbufs(app)?;
+    let mut entries = read_recent_activity_file(&paths.activity_log, "Fero", limit)?;
+    entries.extend(read_recent_activity_file(
+        &paths.rclone_log,
+        "rclone",
+        limit,
+    )?);
+    entries.sort_by(|left, right| activity_sort_key(right).cmp(&activity_sort_key(left)));
+    entries.truncate(limit);
+    Ok(entries)
+}
+
+fn record_activity(
+    app: &AppHandle,
+    level: &str,
+    source: &str,
+    message: &str,
+) -> Result<(), String> {
+    let paths = resolve_pathbufs(app)?;
+    let timestamp = now_millis().to_string();
+    let entry = ActivityLogEntry {
+        id: format!("fero-{timestamp}"),
+        timestamp,
+        level: level.to_string(),
+        source: source.to_string(),
+        message: message.to_string(),
+        raw: message.to_string(),
+    };
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.activity_log)
+        .map_err(|err| {
+            format!(
+                "failed to open activity log {}: {err}",
+                paths.activity_log.display()
+            )
+        })?;
+    let line = serde_json::to_string(&entry)
+        .map_err(|err| format!("failed to serialize activity log entry: {err}"))?;
+    writeln!(file, "{line}").map_err(|err| {
+        format!(
+            "failed to write activity log {}: {err}",
+            paths.activity_log.display()
+        )
+    })
 }
 
 struct ResolvedPaths {
@@ -839,6 +895,7 @@ struct ResolvedPaths {
     rclone_config: PathBuf,
     rclone_cache: PathBuf,
     default_mount_root: PathBuf,
+    activity_log: PathBuf,
     rclone_log: PathBuf,
     drive_catalog: PathBuf,
 }
@@ -1543,13 +1600,47 @@ fn get_overview(app: AppHandle, state: State<'_, AppState>) -> Result<AppOvervie
 #[tauri::command]
 fn start_rclone(app: AppHandle, state: State<'_, AppState>) -> Result<DaemonStatus, String> {
     let mut manager = lock_manager(&state)?;
-    manager.start(&app)
+    let result = manager.start(&app);
+    match &result {
+        Ok(status) => {
+            let source = status.source.as_deref().unwrap_or("rclone");
+            let _ = record_activity(
+                &app,
+                "info",
+                "Fero",
+                &format!("Mount service started using {source}."),
+            );
+        }
+        Err(err) => {
+            let _ = record_activity(
+                &app,
+                "error",
+                "Fero",
+                &format!("Mount service failed to start: {err}"),
+            );
+        }
+    }
+    result
 }
 
 #[tauri::command]
 fn stop_rclone(app: AppHandle, state: State<'_, AppState>) -> Result<DaemonStatus, String> {
     let mut manager = lock_manager(&state)?;
-    manager.stop(&app)
+    let result = manager.stop(&app);
+    match &result {
+        Ok(_) => {
+            let _ = record_activity(&app, "info", "Fero", "Mount service stopped.");
+        }
+        Err(err) => {
+            let _ = record_activity(
+                &app,
+                "error",
+                "Fero",
+                &format!("Mount service failed to stop: {err}"),
+            );
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -1701,6 +1792,13 @@ fn create_network_drive(
         },
     )?;
 
+    let _ = record_activity(
+        &app,
+        "info",
+        "Fero",
+        &format!("Mounted \"{display_name}\" at {mount_point}."),
+    );
+
     Ok(NetworkDriveResult {
         protocol,
         display_name,
@@ -1731,7 +1829,9 @@ fn test_network_drive(
 
     let mut manager = lock_manager(&state)?;
     if let Err(err) = manager.ensure_started(&app) {
-        return Ok(connection_failure_result(protocol, fs, err));
+        let result = connection_failure_result(protocol, fs, err);
+        let _ = record_activity(&app, "error", "Fero", &result.summary);
+        return Ok(result);
     }
 
     if let Err(err) = manager.call_rc(
@@ -1745,7 +1845,9 @@ fn test_network_drive(
             },
         }),
     ) {
-        return Ok(connection_failure_result(protocol, fs, err));
+        let result = connection_failure_result(protocol, fs, err);
+        let _ = record_activity(&app, "error", "Fero", &result.summary);
+        return Ok(result);
     }
 
     let probe = manager.call_rc(
@@ -1768,6 +1870,12 @@ fn test_network_drive(
                 .or_else(|| value.get("List"))
                 .and_then(Value::as_array)
                 .map(Vec::len);
+            let _ = record_activity(
+                &app,
+                "info",
+                "Fero",
+                &format!("Connection verified for {}.", protocol.to_uppercase()),
+            );
             Ok(NetworkDriveTestResult {
                 ok: true,
                 protocol,
@@ -1782,6 +1890,7 @@ fn test_network_drive(
         Err(err) => {
             let mut result = connection_failure_result(protocol, fs, err);
             result.warnings = warnings;
+            let _ = record_activity(&app, "error", "Fero", &result.summary);
             Ok(result)
         }
     }
@@ -1870,6 +1979,14 @@ fn update_saved_drive(
         }
     }
 
+    let level = if warnings.is_empty() { "info" } else { "warn" };
+    let message = if remounted {
+        format!("Saved and remounted \"{}\".", drive.display_name)
+    } else {
+        format!("Saved settings for \"{}\".", drive.display_name)
+    };
+    let _ = record_activity(&app, level, "Fero", &message);
+
     Ok(UpdateDriveResult {
         drive,
         remote,
@@ -1897,6 +2014,15 @@ fn mount_saved_drive(
             )),
         };
         let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+        let _ = record_activity(
+            &app,
+            "error",
+            "Fero",
+            &format!(
+                "Could not mount \"{}\": {}",
+                updated_drive.display_name, issue.summary
+            ),
+        );
         return Ok(MountDriveResult {
             drive: updated_drive,
             mounted: false,
@@ -1909,6 +2035,15 @@ fn mount_saved_drive(
     if let Err(err) = manager.ensure_started(&app) {
         let issue = diagnose_mount_error(&err);
         let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+        let _ = record_activity(
+            &app,
+            "error",
+            "Fero",
+            &format!(
+                "Could not mount \"{}\": {}",
+                updated_drive.display_name, issue.summary
+            ),
+        );
         return Ok(MountDriveResult {
             drive: updated_drive,
             mounted: false,
@@ -1920,6 +2055,15 @@ fn mount_saved_drive(
     match mount_drive(&manager, &drive) {
         Ok(value) => {
             let updated_drive = update_drive_health(&app, &drive.id, "mounted", None)?;
+            let _ = record_activity(
+                &app,
+                "info",
+                "Fero",
+                &format!(
+                    "Mounted \"{}\" at {}.",
+                    updated_drive.display_name, updated_drive.mount_point
+                ),
+            );
             Ok(MountDriveResult {
                 drive: updated_drive,
                 mounted: true,
@@ -1930,6 +2074,15 @@ fn mount_saved_drive(
         Err(err) => {
             let issue = diagnose_mount_error(&err);
             let updated_drive = update_drive_health(&app, &drive.id, "attention", Some(&issue))?;
+            let _ = record_activity(
+                &app,
+                "error",
+                "Fero",
+                &format!(
+                    "Could not mount \"{}\": {}",
+                    updated_drive.display_name, issue.summary
+                ),
+            );
             Ok(MountDriveResult {
                 drive: updated_drive,
                 mounted: false,
@@ -1954,6 +2107,12 @@ fn restore_saved_drives(
     let attempted = auto_drives.len();
 
     if auto_drives.is_empty() {
+        let _ = record_activity(
+            &app,
+            "info",
+            "Fero",
+            "No drives were configured for launch restore.",
+        );
         return Ok(RestoreDrivesResult {
             attempted,
             mounted: 0,
@@ -1978,6 +2137,12 @@ fn restore_saved_drives(
                 }
             })
             .collect();
+        let _ = record_activity(
+            &app,
+            "error",
+            "Fero",
+            &format!("Launch restore could not start the mount service: {err}"),
+        );
         return Ok(RestoreDrivesResult {
             attempted,
             mounted: 0,
@@ -2060,6 +2225,15 @@ fn restore_saved_drives(
         }
     }
 
+    let failed = attempted.saturating_sub(mounted);
+    let level = if failed > 0 { "warn" } else { "info" };
+    let _ = record_activity(
+        &app,
+        level,
+        "Fero",
+        &format!("Launch restore mounted {mounted}/{attempted} drives."),
+    );
+
     Ok(RestoreDrivesResult {
         attempted,
         mounted,
@@ -2074,7 +2248,15 @@ fn set_drive_auto_mount(
     drive_id: String,
     auto_mount: bool,
 ) -> Result<SavedDrive, String> {
-    update_drive_auto_mount(&app, &drive_id, auto_mount)
+    let drive = update_drive_auto_mount(&app, &drive_id, auto_mount)?;
+    let state = if auto_mount { "enabled" } else { "disabled" };
+    let _ = record_activity(
+        &app,
+        "info",
+        "Fero",
+        &format!("Launch restore {state} for \"{}\".", drive.display_name),
+    );
+    Ok(drive)
 }
 
 #[tauri::command]
@@ -2119,6 +2301,15 @@ fn clear_drive_cache(
         warnings.push(
             "Stop this drive before clearing cached files, then run clear cache again.".to_string(),
         );
+        let _ = record_activity(
+            &app,
+            "warn",
+            "Fero",
+            &format!(
+                "Skipped cache cleanup for \"{}\" because it is mounted.",
+                drive.display_name
+            ),
+        );
         return Ok(ClearDriveCacheResult {
             status: before,
             removed_bytes,
@@ -2145,6 +2336,17 @@ fn clear_drive_cache(
 
     let (status, mut status_warnings) = cache_status_for_drive(&app, Some(&manager), &drive)?;
     warnings.append(&mut status_warnings);
+
+    let level = if warnings.is_empty() { "info" } else { "warn" };
+    let _ = record_activity(
+        &app,
+        level,
+        "Fero",
+        &format!(
+            "Cleared {} of cache for \"{}\".",
+            removed_bytes, drive.display_name
+        ),
+    );
 
     Ok(ClearDriveCacheResult {
         status,
@@ -2183,6 +2385,13 @@ fn remove_saved_drive(
     }
 
     let drive = delete_drive(&app, &drive_id)?;
+    let level = if warnings.is_empty() { "info" } else { "warn" };
+    let _ = record_activity(
+        &app,
+        level,
+        "Fero",
+        &format!("Removed \"{}\" from Fero.", drive.display_name),
+    );
     Ok(RemoveDriveResult {
         drive,
         unmount,
@@ -2199,7 +2408,16 @@ fn unmount(
 ) -> Result<Value, String> {
     let mut manager = lock_manager(&state)?;
     manager.ensure_started(&app)?;
-    manager.call_rc("mount/unmount", json!({ "mountPoint": mount_point }))
+    let result = manager.call_rc("mount/unmount", json!({ "mountPoint": mount_point }));
+    match &result {
+        Ok(_) => {
+            let _ = record_activity(&app, "info", "Fero", "Drive unmounted.");
+        }
+        Err(err) => {
+            let _ = record_activity(&app, "error", "Fero", &format!("Unmount failed: {err}"));
+        }
+    }
+    result
 }
 
 #[tauri::command]

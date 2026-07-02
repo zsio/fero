@@ -198,13 +198,6 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(117, 215, 180, 0.15);
 }
 
-.service-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 12px;
-}
-
 .restore-note {
   margin-top: 12px;
   border: 1px solid rgba(117, 215, 180, 0.25);
@@ -220,6 +213,42 @@ button:disabled {
   border-color: rgba(239, 196, 90, 0.36);
   background: rgba(239, 196, 90, 0.1);
   color: #f5d991;
+}
+
+.service-advanced {
+  margin-top: 12px;
+}
+
+.service-advanced summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  border: 1px solid rgba(48, 58, 67, 0.76);
+  border-radius: 7px;
+  background: #11171c;
+  padding: 6px 8px;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.service-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.service-advanced[open] summary {
+  border-color: var(--line-strong);
+  color: var(--ink-strong);
+}
+
+.service-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .sidebar-foot {
@@ -625,6 +654,31 @@ button:disabled {
   line-height: 1.55;
 }
 
+.empty-protocols {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.empty-protocols span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  min-height: 28px;
+  margin: 0;
+  border: 1px solid rgba(48, 58, 67, 0.78);
+  border-radius: 999px;
+  background: #12181d;
+  padding: 5px 9px;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+}
+
 .empty-action {
   margin-top: 16px;
 }
@@ -664,6 +718,34 @@ button:disabled {
   border-color: rgba(117, 215, 180, 0.62);
   background: rgba(117, 215, 180, 0.11);
   color: var(--accent);
+}
+
+.setup-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  padding: 0 14px 10px;
+}
+
+.setup-rail div {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid rgba(48, 58, 67, 0.72);
+  border-radius: 7px;
+  background: #11171c;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.setup-rail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mount-environment {
