@@ -26,6 +26,7 @@ import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveConnectionFields } from "./features/driveSetup/DriveConnectionFields";
+import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
 import { DriveSetupStatus } from "./features/driveSetup/DriveSetupStatus";
 import { DriveSetupForm, FormActionRow, FormButton, ProtocolSummaryLine, TextInput } from "./features/driveSetup/FormControls";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
@@ -760,6 +761,7 @@ function App() {
             <PaneSection className="flex-none">
               <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
+              <MountEnvironmentPanel environment={overview.mountEnvironment} />
               <DriveSetupStatus
                 form={drive}
                 protocol={selectedProtocol}
