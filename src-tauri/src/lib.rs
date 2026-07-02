@@ -98,21 +98,6 @@ struct MountEnvironment {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TransferRequest {
-    mode: Option<String>,
-    source: String,
-    destination: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MountRequest {
-    remote: String,
-    mount_point: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct NetworkDriveRequest {
     protocol: String,
     display_name: String,
@@ -1644,74 +1629,6 @@ fn stop_rclone(app: AppHandle, state: State<'_, AppState>) -> Result<DaemonStatu
 }
 
 #[tauri::command]
-fn call_rclone_rc(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    endpoint: String,
-    payload: Option<Value>,
-) -> Result<Value, String> {
-    let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    manager.call_rc(&endpoint, payload.unwrap_or_else(|| json!({})))
-}
-
-#[tauri::command]
-fn list_providers(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
-    let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    manager.call_rc("config/providers", json!({}))
-}
-
-#[tauri::command]
-fn list_remotes(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
-    let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    manager.call_rc("config/listremotes", json!({}))
-}
-
-#[tauri::command]
-fn start_transfer(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: TransferRequest,
-) -> Result<Value, String> {
-    let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    let mode = request.mode.unwrap_or_else(|| "copy".to_string());
-    let endpoint = match mode.as_str() {
-        "sync" => "sync/sync",
-        "move" => "sync/move",
-        _ => "sync/copy",
-    };
-    manager.call_rc(
-        endpoint,
-        json!({
-            "srcFs": request.source,
-            "dstFs": request.destination,
-            "_async": true,
-            "_group": format!("transfer-{}", generate_password()),
-        }),
-    )
-}
-
-#[tauri::command]
-fn start_mount(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: MountRequest,
-) -> Result<Value, String> {
-    let mut manager = lock_manager(&state)?;
-    manager.ensure_started(&app)?;
-    manager.call_rc(
-        "mount/mount",
-        json!({
-            "fs": request.remote,
-            "mountPoint": request.mount_point,
-        }),
-    )
-}
-
-#[tauri::command]
 fn create_network_drive(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -2450,11 +2367,6 @@ pub fn run() {
             get_overview,
             start_rclone,
             stop_rclone,
-            call_rclone_rc,
-            list_providers,
-            list_remotes,
-            start_transfer,
-            start_mount,
             create_network_drive,
             test_network_drive,
             update_saved_drive,

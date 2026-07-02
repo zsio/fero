@@ -1,6 +1,11 @@
 # Fero
 
-Fero is a Tauri v2 desktop control plane for rclone.
+Fero is an open-source RaiDrive-style mount manager built on top of rclone. It
+is focused on making network storage feel like a local drive or local folder,
+with clear mount state, cache state, activity, and actionable errors.
+
+Fero is not a general-purpose rclone sync GUI. Sync and transfer workflows are
+secondary to reliable mount lifecycle management.
 
 ## Stack
 
@@ -12,7 +17,7 @@ Fero is a Tauri v2 desktop control plane for rclone.
 ## Architecture
 
 ```text
-React UI
+Shared React UI
   -> Tauri invoke commands
   -> Rust RcloneManager
   -> rclone rcd sidecar
@@ -22,6 +27,11 @@ React UI
 The frontend does not execute shell commands directly. Rust owns the rclone
 process lifecycle, RC credentials, app-scoped `rclone.conf`, logs, shutdown, and
 fallback cleanup.
+
+The same React UI is intended to be reused by the desktop app and the future
+Docker/Web control surface. Desktop commands currently go through Tauri; the
+Docker/Web edition should expose equivalent HTTP APIs around the same product
+concepts.
 
 ## Sidecar binaries
 
@@ -61,12 +71,14 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ## Current scope
 
-- Starts and stops an app-owned `rclone rcd`
+- Starts and stops an app-owned `rclone rcd` mount service
 - Uses local RC auth on a random loopback port
-- Stores app-owned rclone config and JSON logs
-- Exposes remotes/providers discovery
-- Exposes async transfer launch
-- Exposes mount/list/unmount commands
+- Stores app-owned rclone config, drive catalog, cache files, and JSON logs
+- Creates and tests WebDAV, FTP, SFTP, and SMB network drives
+- Mounts saved drives into local folders
+- Lists active mount sessions and unmounts individual drives
+- Restores selected drives on app launch
+- Shows per-drive health, cache status, recent activity, and mount errors
 
 Mount behavior still depends on system prerequisites:
 
