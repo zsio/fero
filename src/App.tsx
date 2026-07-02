@@ -31,7 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import "./App.css";
+import "./styles/index.css";
 
 type JsonValue = unknown;
 type ProtocolId = "webdav" | "ftp" | "sftp" | "smb";
@@ -922,6 +922,11 @@ function App() {
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
               <SetupRail protocol={selectedProtocol} />
               <MountEnvironmentPanel environment={overview.mountEnvironment} />
+              <DriveReadinessPanel
+                form={drive}
+                protocol={selectedProtocol}
+                suggestion={mountPointSuggestion}
+              />
 
               <form
                 className="drive-form"
@@ -1244,6 +1249,60 @@ function MountEnvironmentPanel({ environment }: { environment: MountEnvironment 
       <small title={environment.detectedPaths.join("\n") || environment.requirement}>
         {environment.platform} · {pathLabel}
       </small>
+    </div>
+  );
+}
+
+function DriveReadinessPanel({
+  form,
+  protocol,
+  suggestion,
+}: {
+  form: DriveForm;
+  protocol: ProtocolDefinition;
+  suggestion: MountPointSuggestion | null;
+}) {
+  const items = driveReadinessItems(form, protocol, suggestion);
+  const pendingCount = items.filter((item) => !item.ready).length;
+  const canTest = canTestDriveForm(form);
+  const canSave = canSaveDriveForm(form);
+  const Icon = canSave ? ShieldCheck : AlertTriangle;
+  const status = canSave ? "Ready to mount" : canTest ? "Name this drive" : "Connection details needed";
+  const panelTone = canSave
+    ? "border-[rgba(117,215,180,0.34)] bg-[rgba(117,215,180,0.07)]"
+    : "border-[rgba(239,196,90,0.34)] bg-[rgba(239,196,90,0.07)]";
+  const headingTone = canSave ? "text-[var(--accent)]" : "text-[var(--amber)]";
+
+  return (
+    <div className={`mx-[14px] mb-2.5 grid gap-2 rounded-lg border px-2.5 py-[9px] ${panelTone}`}>
+      <div className="flex items-center justify-between gap-2.5">
+        <div className={`flex min-w-0 items-center gap-[7px] ${headingTone}`}>
+          <Icon size={15} />
+          <strong className="truncate text-xs font-bold text-[var(--ink-strong)]">{status}</strong>
+        </div>
+        <span className="shrink-0 text-[11px] text-[var(--muted)]">
+          {pendingCount === 0 ? "All set" : `${pendingCount} pending`}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {items.map((item) => {
+          const ItemIcon = item.icon;
+          return (
+            <div
+              key={item.label}
+              className={`grid min-h-7 min-w-0 grid-cols-[16px_minmax(54px,0.9fr)_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-[rgba(48,58,67,0.72)] bg-[#11171c] px-2 py-1.5 text-[11px] ${
+                item.ready ? "text-[var(--accent)]" : "text-[var(--muted)]"
+              }`}
+            >
+              <ItemIcon size={14} />
+              <span className="truncate">{item.label}</span>
+              <strong className="truncate text-right font-semibold text-[var(--muted-strong)]" title={item.value}>
+                {item.value}
+              </strong>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1841,6 +1900,70 @@ function canTestDriveForm(form: DriveForm) {
 
 function canSaveDriveForm(form: DriveForm) {
   return Boolean(form.displayName.trim() && canTestDriveForm(form));
+}
+
+function driveReadinessItems(
+  form: DriveForm,
+  protocol: ProtocolDefinition,
+  suggestion: MountPointSuggestion | null,
+) {
+  const endpoint = endpointReadiness(form, protocol);
+  const localFolder = form.mountPoint.trim() || suggestion?.path || "";
+  return [
+    {
+      icon: HardDrive,
+      label: "Name",
+      ready: Boolean(form.displayName.trim()),
+      value: form.displayName.trim() || "Required",
+    },
+    endpoint,
+    {
+      icon: FolderOpen,
+      label: "Local folder",
+      ready: Boolean(localFolder),
+      value: localFolder ? shortPath(localFolder) : "Resolving",
+    },
+    {
+      icon: Database,
+      label: "Cache",
+      ready: true,
+      value: cacheLabelFromString(form.cacheMode),
+    },
+  ];
+}
+
+function endpointReadiness(form: DriveForm, protocol: ProtocolDefinition) {
+  if (form.protocol === "webdav") {
+    const url = form.url.trim();
+    return {
+      icon: protocol.icon,
+      label: "WebDAV address",
+      ready: Boolean(url),
+      value: url || "Required",
+    };
+  }
+
+  if (form.protocol === "smb") {
+    const host = form.host.trim();
+    const share = form.share.trim();
+    const value =
+      host && share ? `${host}/${share}` : host ? "Share required" : share ? "Server required" : "Server and share";
+    return {
+      icon: protocol.icon,
+      label: "SMB share",
+      ready: Boolean(host && share),
+      value,
+    };
+  }
+
+  const host = form.host.trim();
+  const port = form.port.trim();
+  return {
+    icon: protocol.icon,
+    label: `${protocol.label} server`,
+    ready: Boolean(host),
+    value: host ? `${host}${port ? `:${port}` : ""}` : "Required",
+  };
 }
 
 function formFromDriveItem(item: DriveListItem): DriveForm {

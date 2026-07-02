@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Legacy CSS remains here while existing surfaces migrate to Tailwind utilities. */
+@import "./legacy.css";
