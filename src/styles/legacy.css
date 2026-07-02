@@ -326,8 +326,7 @@ button:disabled {
 .tool-button,
 .submit-button,
 .secondary-button,
-.danger-button,
-.empty-action {
+.danger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -350,8 +349,7 @@ button:disabled {
 .tool-button:hover:not(:disabled),
 .submit-button:hover:not(:disabled),
 .secondary-button:hover:not(:disabled),
-.danger-button:hover:not(:disabled),
-.empty-action:hover:not(:disabled) {
+.danger-button:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: #2a333b;
 }
@@ -359,22 +357,19 @@ button:disabled {
 .tool-button:active:not(:disabled),
 .submit-button:active:not(:disabled),
 .secondary-button:active:not(:disabled),
-.danger-button:active:not(:disabled),
-.empty-action:active:not(:disabled) {
+.danger-button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
 .tool-button-primary,
-.submit-button,
-.empty-action {
+.submit-button {
   border-color: rgba(117, 215, 180, 0.72);
   background: var(--accent);
   color: var(--accent-ink);
 }
 
 .tool-button-primary:hover:not(:disabled),
-.submit-button:hover:not(:disabled),
-.empty-action:hover:not(:disabled) {
+.submit-button:hover:not(:disabled) {
   border-color: rgba(139, 224, 156, 0.8);
   background: #8be0bd;
 }
@@ -616,7 +611,6 @@ button:disabled {
   color: var(--muted-strong);
 }
 
-.empty-mounts,
 .empty-detail {
   display: grid;
   place-items: center;
@@ -626,59 +620,12 @@ button:disabled {
   text-align: center;
 }
 
-.empty-icon {
-  display: grid;
-  width: 54px;
-  height: 54px;
-  place-items: center;
-  border: 1px solid rgba(117, 215, 180, 0.28);
-  border-radius: 10px;
-  background: #151b20;
-  color: var(--accent);
-}
-
-.empty-mounts strong {
-  margin-top: 13px;
-  color: var(--ink-strong);
-  font-size: 16px;
-}
-
-.empty-mounts span,
 .empty-detail span {
   max-width: 360px;
   margin-top: 7px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
-}
-
-.empty-protocols {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 16px;
-}
-
-.empty-protocols span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  width: auto;
-  min-height: 28px;
-  margin: 0;
-  border: 1px solid rgba(48, 58, 67, 0.78);
-  border-radius: 999px;
-  background: #12181d;
-  padding: 5px 9px;
-  color: var(--muted-strong);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1;
-}
-
-.empty-action {
-  margin-top: 16px;
 }
 
 .create-pane {

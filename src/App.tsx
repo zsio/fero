@@ -51,6 +51,7 @@ import type {
   NetworkDriveTestResult,
   ProtocolId,
 } from "./features/driveSetup/model";
+import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import "./styles/index.css";
 
 type JsonValue = unknown;
@@ -835,7 +836,7 @@ function App() {
                   />
                 ))
               ) : (
-                <EmptyMounts daemonRunning={daemonRunning} onCreate={() => focusFirstCreateField()} />
+                <EmptyDriveList daemonRunning={daemonRunning} onCreate={() => focusFirstCreateField()} />
               )}
             </div>
           </section>
@@ -1147,37 +1148,6 @@ function MountRow({ drive, selected, onSelect }: { drive: DriveListItem; selecte
         </div>
       </div>
     </button>
-  );
-}
-
-function EmptyMounts({ daemonRunning, onCreate }: { daemonRunning: boolean; onCreate: () => void }) {
-  return (
-    <div className="empty-mounts">
-      <div className="empty-icon">
-        <FolderPlus size={24} />
-      </div>
-      <strong>{daemonRunning ? "No network drives yet" : "Add your first network drive"}</strong>
-      <span>
-        {daemonRunning
-          ? "Choose a protocol, enter your server details, and Fero will mount it as a local folder."
-          : "Fero will start its mount service automatically when you connect a drive."}
-      </span>
-      <div className="empty-protocols" aria-label="Supported protocols">
-        {protocols.map((protocol) => {
-          const Icon = protocol.icon;
-          return (
-            <span key={protocol.id}>
-              <Icon size={13} />
-              {protocol.label}
-            </span>
-          );
-        })}
-      </div>
-      <button className="empty-action" type="button" onClick={onCreate}>
-        <Plus size={16} />
-        <span>Add network drive</span>
-      </button>
-    </div>
   );
 }
 
