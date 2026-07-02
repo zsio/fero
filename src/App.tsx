@@ -28,6 +28,9 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
+import { CachePanel } from "./features/cache/CachePanel";
+import { formatBytes } from "./features/cache/model";
+import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
 import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
@@ -163,26 +166,6 @@ type RestoreDrivesResult = {
   mounted: number;
   skipped: number;
   items: RestoreDriveItem[];
-};
-
-type DriveCacheStatus = {
-  driveId: string;
-  cacheMode: string;
-  cacheRoot: string;
-  driveCachePaths: string[];
-  driveBytes: number;
-  totalBytes: number;
-  fileCount: number;
-  mounted: boolean;
-  lastScannedAt: number;
-  message: string;
-};
-
-type ClearDriveCacheResult = {
-  status: DriveCacheStatus;
-  removedBytes: number;
-  removedPaths: string[];
-  warnings: string[];
 };
 
 type ActionOptions = {
@@ -1314,7 +1297,7 @@ function MountDetails({
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
       {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
       <CachePanel
-        drive={drive}
+        cacheMode={drive.cacheMode}
         status={cacheStatus}
         busy={cacheBusy}
         onRefresh={onRefreshCache}
@@ -1368,60 +1351,6 @@ function MountIssuePanel({ drive }: { drive: DriveListItem }) {
       </div>
       {drive.lastIssueRecommendation && <span>{drive.lastIssueRecommendation}</span>}
       {drive.lastCheckedAt && <small>Last checked {formatRelativeTime(drive.lastCheckedAt)}</small>}
-    </div>
-  );
-}
-
-function CachePanel({
-  drive,
-  status,
-  busy,
-  onRefresh,
-  onClear,
-}: {
-  drive: DriveListItem;
-  status: DriveCacheStatus | null;
-  busy: boolean;
-  onRefresh: () => void;
-  onClear: () => void;
-}) {
-  const sizeLabel = status ? formatBytes(status.driveBytes) : "Not scanned";
-  const totalLabel = status ? formatBytes(status.totalBytes) : "Unknown";
-  const fileLabel = status ? `${status.fileCount} cached file${status.fileCount === 1 ? "" : "s"}` : "Scan to inspect files";
-  const root = status?.cacheRoot ?? "Cache path not resolved";
-  const mode = cacheLabelFromString(drive.cacheMode);
-
-  return (
-    <div className="cache-panel">
-      <div className="cache-panel-heading">
-        <div>
-          <Database size={15} />
-          <strong>Cache status</strong>
-        </div>
-        <span>{mode}</span>
-      </div>
-      <div className="cache-metrics">
-        <div>
-          <span>This drive</span>
-          <strong>{busy && !status ? "Scanning..." : sizeLabel}</strong>
-        </div>
-        <div>
-          <span>Fero cache</span>
-          <strong>{totalLabel}</strong>
-        </div>
-      </div>
-      <p>{status?.message ?? "Fero keeps rclone VFS cache in its own cache folder."}</p>
-      <small title={root}>{shortPath(root)} · {fileLabel}</small>
-      <div className="cache-actions">
-        <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
-          {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-          <span>Refresh cache</span>
-        </button>
-        <button className="secondary-button" type="button" disabled={busy || !status || status.driveBytes === 0} onClick={onClear}>
-          <Trash2 size={15} />
-          <span>Clear cache</span>
-        </button>
-      </div>
     </div>
   );
 }
@@ -1724,19 +1653,6 @@ function fallbackMountPointSuggestion(displayName: string, defaultMountRoot: str
     root,
     path: joinDisplayPath(root, safeFolderName(displayName)),
   };
-}
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
-  return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 function formatRelativeTime(timestamp: number) {
