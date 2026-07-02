@@ -1,8 +1,5 @@
 import {
-  Database,
-  FolderOpen,
   Globe2,
-  HardDrive,
   LockKeyhole,
   Network,
   Server,
@@ -65,7 +62,7 @@ export type ProtocolDefinition = {
   needsShare?: boolean;
 };
 
-export type DriveReadinessItem = {
+export type DriveReadinessStatus = {
   icon: LucideIcon;
   label: string;
   ready: boolean;
@@ -143,37 +140,7 @@ export function canSaveDriveForm(form: DriveForm) {
   return Boolean(form.displayName.trim() && canTestDriveForm(form));
 }
 
-export function driveReadinessItems(
-  form: DriveForm,
-  protocol: ProtocolDefinition,
-  suggestion: MountPointSuggestion | null,
-): DriveReadinessItem[] {
-  const endpoint = endpointReadiness(form, protocol);
-  const localFolder = form.mountPoint.trim() || suggestion?.path || "";
-  return [
-    {
-      icon: HardDrive,
-      label: "Name",
-      ready: Boolean(form.displayName.trim()),
-      value: form.displayName.trim() || "Required",
-    },
-    endpoint,
-    {
-      icon: FolderOpen,
-      label: "Local folder",
-      ready: Boolean(localFolder),
-      value: localFolder ? shortPath(localFolder) : "Resolving",
-    },
-    {
-      icon: Database,
-      label: "Cache",
-      ready: true,
-      value: cacheLabelFromString(form.cacheMode),
-    },
-  ];
-}
-
-export function endpointReadiness(form: DriveForm, protocol: ProtocolDefinition): DriveReadinessItem {
+export function endpointReadiness(form: DriveForm, protocol: ProtocolDefinition): DriveReadinessStatus {
   if (form.protocol === "webdav") {
     const url = form.url.trim();
     return {

@@ -28,11 +28,10 @@ import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveConnectionFields } from "./features/driveSetup/DriveConnectionFields";
-import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import { DriveSetupStatus } from "./features/driveSetup/DriveSetupStatus";
 import { DriveSetupForm, FormActionRow, FormButton, ProtocolSummaryLine, TextInput } from "./features/driveSetup/FormControls";
-import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
 import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
-import { ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
+import { ProtocolPicker } from "./features/driveSetup/ProtocolSetup";
 import {
   cacheLabelFromString,
   canSaveDriveForm,
@@ -823,12 +822,11 @@ function App() {
             <section className="pane-section create-pane">
               <PaneHeader title="Add network drive" meta={selectedProtocol.label} icon={FolderPlus} />
               <ProtocolPicker selected={drive.protocol} onSelect={selectProtocol} />
-              <SetupRail protocol={selectedProtocol} />
-              <MountEnvironmentPanel environment={overview.mountEnvironment} />
-              <DriveReadinessPanel
+              <DriveSetupStatus
                 form={drive}
                 protocol={selectedProtocol}
                 suggestion={mountPointSuggestion}
+                environment={overview.mountEnvironment}
               />
 
               <DriveSetupForm onSubmit={() => void createNetworkDrive()}>
