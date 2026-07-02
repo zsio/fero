@@ -325,8 +325,7 @@ button:disabled {
 
 .tool-button,
 .submit-button,
-.secondary-button,
-.danger-button {
+.secondary-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -348,16 +347,14 @@ button:disabled {
 
 .tool-button:hover:not(:disabled),
 .submit-button:hover:not(:disabled),
-.secondary-button:hover:not(:disabled),
-.danger-button:hover:not(:disabled) {
+.secondary-button:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: #2a333b;
 }
 
 .tool-button:active:not(:disabled),
 .submit-button:active:not(:disabled),
-.secondary-button:active:not(:disabled),
-.danger-button:active:not(:disabled) {
+.secondary-button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
@@ -646,85 +643,10 @@ button:disabled {
   width: 100%;
 }
 
-.mount-details {
-  display: grid;
-  gap: 8px;
-  padding: 0 14px 14px;
-}
-
-.drive-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr);
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.mount-issue {
-  display: grid;
-  gap: 7px;
-  border: 1px solid rgba(239, 196, 90, 0.36);
-  border-radius: 8px;
-  background: rgba(239, 196, 90, 0.09);
-  padding: 10px 11px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.mount-issue-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--amber);
-}
-
-.mount-issue-heading strong {
-  color: var(--ink-strong);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.mount-issue small {
-  color: var(--muted);
-}
-
-.detail-line {
-  display: grid;
-  grid-template-columns: 18px 90px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  border-bottom: 1px solid rgba(48, 58, 67, 0.62);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.detail-line strong {
-  overflow: hidden;
-  color: var(--ink-strong);
-  font-weight: 610;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.danger-button {
-  width: 100%;
-  margin-top: 12px;
-  border-color: rgba(255, 131, 124, 0.45);
-  background: var(--danger-soft);
-  color: #ffd3d0;
-}
-
 .secondary-button {
   border-color: var(--line);
   background: #151b20;
   color: var(--muted-strong);
-}
-
-.preference-button {
-  width: 100%;
-  margin-top: 10px;
 }
 
 .diagnostics-section {

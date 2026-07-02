@@ -6,9 +6,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import {
   Activity,
   AlertTriangle,
-  Cloud,
   Database,
-  ExternalLink,
   FolderOpen,
   FolderPlus,
   HardDrive,
@@ -21,14 +19,12 @@ import {
   ShieldCheck,
   Square,
   Terminal,
-  Trash2,
   Wifi,
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
-import { CachePanel } from "./features/cache/CachePanel";
 import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
@@ -60,6 +56,8 @@ import { DriveRow } from "./features/driveLibrary/DriveRow";
 import type { DriveRowView } from "./features/driveLibrary/DriveRow";
 import { EmptyDriveDetails } from "./features/driveLibrary/EmptyDriveDetails";
 import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
+import { MountDetails } from "./features/driveLibrary/MountDetails";
+import type { MountDetailsDrive } from "./features/driveLibrary/MountDetails";
 import "./styles/index.css";
 
 type JsonValue = unknown;
@@ -999,7 +997,7 @@ function App() {
                 />
               ) : selectedDrive ? (
                 <MountDetails
-                  drive={selectedDrive}
+                  drive={driveDetailsView(selectedDrive)}
                   busy={busy}
                   cacheStatus={cacheStatusByDrive[selectedDrive.id] ?? null}
                   cacheBusy={cacheBusyDriveId === selectedDrive.id}
@@ -1260,111 +1258,6 @@ function EditDriveSettings({
   );
 }
 
-function MountDetails({
-  drive,
-  busy,
-  cacheStatus,
-  cacheBusy,
-  onMount,
-  onOpen,
-  onUnmount,
-  onRemove,
-  onAutoMountChange,
-  onEdit,
-  onRefreshCache,
-  onClearCache,
-}: {
-  drive: DriveListItem;
-  busy: boolean;
-  cacheStatus: DriveCacheStatus | null;
-  cacheBusy: boolean;
-  onMount: () => void;
-  onOpen: () => void;
-  onUnmount: () => void;
-  onRemove: () => void;
-  onAutoMountChange: (autoMount: boolean) => void;
-  onEdit: () => void;
-  onRefreshCache: () => void;
-  onClearCache: () => void;
-}) {
-  return (
-    <div className="mount-details">
-      <DetailLine icon={HardDrive} label="Name" value={drive.displayName} />
-      <DetailLine icon={FolderOpen} label="Local folder" value={drive.mountPoint} />
-      <DetailLine icon={Cloud} label="Remote" value={driveEndpointLabel(drive)} />
-      <DetailLine icon={Wifi} label="Protocol" value={protocolLabel(drive.protocol)} />
-      <DetailLine icon={Database} label="Cache" value={cacheLabelFromString(drive.cacheMode)} />
-      <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
-      {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
-      <CachePanel
-        cacheMode={drive.cacheMode}
-        status={cacheStatus}
-        busy={cacheBusy}
-        onRefresh={onRefreshCache}
-        onClear={onClearCache}
-      />
-      {drive.mounted ? (
-        <div className="drive-actions">
-          <button className="submit-button" type="button" disabled={busy} onClick={onOpen}>
-            <ExternalLink size={15} />
-            <span>Open folder</span>
-          </button>
-          <button className="secondary-button" type="button" disabled={busy} onClick={onUnmount}>
-            <Square size={15} />
-            <span>Unmount</span>
-          </button>
-        </div>
-      ) : (
-        <div className="drive-actions">
-          <button className="submit-button" type="button" disabled={busy} onClick={onMount}>
-            {busy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            <span>{drive.health === "attention" ? "Retry mount" : "Mount drive"}</span>
-          </button>
-          <button className="secondary-button" type="button" disabled={busy} onClick={onOpen}>
-            <ExternalLink size={15} />
-            <span>Open folder</span>
-          </button>
-        </div>
-      )}
-      <button className="secondary-button preference-button" type="button" disabled={busy} onClick={() => onAutoMountChange(!drive.autoMount)}>
-        <RefreshCw size={15} />
-        <span>{drive.autoMount ? "Disable auto mount" : "Restore on launch"}</span>
-      </button>
-      <button className="secondary-button preference-button" type="button" disabled={busy} onClick={onEdit}>
-        <Pencil size={15} />
-        <span>Edit settings</span>
-      </button>
-      <button className="danger-button" type="button" disabled={busy} onClick={onRemove}>
-        <Trash2 size={15} />
-        <span>Remove from Fero</span>
-      </button>
-    </div>
-  );
-}
-
-function MountIssuePanel({ drive }: { drive: DriveListItem }) {
-  return (
-    <div className="mount-issue" title={drive.lastIssueDetails ?? undefined}>
-      <div className="mount-issue-heading">
-        <AlertTriangle size={15} />
-        <strong>{drive.lastIssueSummary}</strong>
-      </div>
-      {drive.lastIssueRecommendation && <span>{drive.lastIssueRecommendation}</span>}
-      {drive.lastCheckedAt && <small>Last checked {formatRelativeTime(drive.lastCheckedAt)}</small>}
-    </div>
-  );
-}
-
-function DetailLine({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return (
-    <div className="detail-line">
-      <Icon size={15} />
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function TextInput({
   id,
   label,
@@ -1620,6 +1513,24 @@ function driveRowView(drive: DriveListItem): DriveRowView {
   };
 }
 
+function driveDetailsView(drive: DriveListItem): MountDetailsDrive {
+  return {
+    displayName: drive.displayName,
+    mountPoint: drive.mountPoint,
+    endpointLabel: driveEndpointLabel(drive),
+    protocolLabel: protocolLabel(drive.protocol),
+    cacheMode: drive.cacheMode,
+    autoMount: drive.autoMount,
+    mounted: drive.mounted,
+    health: drive.health,
+    status: drive.status,
+    lastIssueSummary: drive.lastIssueSummary,
+    lastIssueRecommendation: drive.lastIssueRecommendation,
+    lastIssueDetails: drive.lastIssueDetails,
+    lastCheckedAt: drive.lastCheckedAt,
+  };
+}
+
 function driveEndpointLabel(drive: DriveListItem) {
   const protocol = normalizeProtocolId(drive.protocol);
   if (protocol === "webdav") return drive.url || drive.remote;
@@ -1653,17 +1564,6 @@ function fallbackMountPointSuggestion(displayName: string, defaultMountRoot: str
     root,
     path: joinDisplayPath(root, safeFolderName(displayName)),
   };
-}
-
-function formatRelativeTime(timestamp: number) {
-  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (diffSeconds < 60) return "just now";
-  const diffMinutes = Math.round(diffSeconds / 60);
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.round(diffHours / 24);
-  return `${diffDays}d ago`;
 }
 
 function focusFirstCreateField() {
