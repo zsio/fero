@@ -238,6 +238,17 @@ struct MountPointSuggestion {
     path: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivityLogEntry {
+    id: String,
+    timestamp: String,
+    level: String,
+    source: String,
+    message: String,
+    raw: String,
+}
+
 fn default_auto_mount() -> bool {
     true
 }
@@ -752,6 +763,75 @@ fn inspect_mount_environment() -> MountEnvironment {
             .to_string(),
         detected_paths: Vec::new(),
     }
+}
+
+fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(ToString::to_string)
+}
+
+fn parse_activity_log_line(index: usize, line: &str) -> ActivityLogEntry {
+    match serde_json::from_str::<Value>(line) {
+        Ok(value) => {
+            let timestamp = text_field(&value, &["time", "Time", "timestamp", "Timestamp"])
+                .unwrap_or_else(|| "unknown time".to_string());
+            let level = text_field(&value, &["level", "Level", "severity", "Severity"])
+                .unwrap_or_else(|| "info".to_string());
+            let source = text_field(
+                &value,
+                &["source", "Source", "object", "Object", "fs", "Fs"],
+            )
+            .unwrap_or_else(|| "rclone".to_string());
+            let message = text_field(
+                &value,
+                &["msg", "Msg", "message", "Message", "error", "Error"],
+            )
+            .unwrap_or_else(|| line.to_string());
+
+            ActivityLogEntry {
+                id: format!("{index}-{timestamp}"),
+                timestamp,
+                level,
+                source,
+                message,
+                raw: line.to_string(),
+            }
+        }
+        Err(_) => ActivityLogEntry {
+            id: format!("{index}-raw"),
+            timestamp: "unknown time".to_string(),
+            level: "info".to_string(),
+            source: "rclone".to_string(),
+            message: line.to_string(),
+            raw: line.to_string(),
+        },
+    }
+}
+
+fn read_recent_activity(app: &AppHandle, limit: usize) -> Result<Vec<ActivityLogEntry>, String> {
+    let paths = resolve_pathbufs(app)?;
+    if !paths.rclone_log.exists() {
+        return Ok(Vec::new());
+    }
+
+    let text = std::fs::read_to_string(&paths.rclone_log).map_err(|err| {
+        format!(
+            "failed to read activity log {}: {err}",
+            paths.rclone_log.display()
+        )
+    })?;
+    let lines = text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let start = lines.len().saturating_sub(limit);
+    Ok(lines[start..]
+        .iter()
+        .rev()
+        .map(|(index, line)| parse_activity_log_line(*index, line))
+        .collect())
 }
 
 struct ResolvedPaths {
@@ -2136,6 +2216,11 @@ fn job_status(app: AppHandle, state: State<'_, AppState>, job_id: u64) -> Result
     manager.call_rc("job/status", json!({ "jobid": job_id }))
 }
 
+#[tauri::command]
+fn get_activity_log(app: AppHandle, limit: Option<usize>) -> Result<Vec<ActivityLogEntry>, String> {
+    read_recent_activity(&app, limit.unwrap_or(40).clamp(1, 200))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2164,7 +2249,8 @@ pub fn run() {
             remove_saved_drive,
             unmount,
             list_mounts,
-            job_status
+            job_status,
+            get_activity_log
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

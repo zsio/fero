@@ -1085,6 +1085,134 @@ button:disabled {
   gap: 8px;
 }
 
+.activity-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+
+.activity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.activity-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--accent);
+}
+
+.activity-heading strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.activity-heading span {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 7px;
+}
+
+.activity-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  border: 1px solid rgba(48, 58, 67, 0.78);
+  border-radius: 8px;
+  background: #12181d;
+  padding: 8px 9px;
+}
+
+.activity-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.activity-item-info .activity-dot {
+  background: var(--accent);
+}
+
+.activity-item-warning .activity-dot {
+  background: var(--amber);
+}
+
+.activity-item-error .activity-dot {
+  background: var(--danger);
+}
+
+.activity-item-muted .activity-dot {
+  background: var(--muted);
+}
+
+.activity-item div {
+  min-width: 0;
+}
+
+.activity-item strong {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-strong);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-item small {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-item em {
+  border: 1px solid rgba(142, 154, 166, 0.26);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  padding: 2px 7px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.activity-empty {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12181d;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.activity-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .detail-line {
   display: grid;
   grid-template-columns: 18px 90px minmax(0, 1fr);

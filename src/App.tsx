@@ -185,6 +185,15 @@ type MountPointSuggestion = {
   path: string;
 };
 
+type ActivityLogEntry = {
+  id: string;
+  timestamp: string;
+  level: string;
+  source: string;
+  message: string;
+  raw: string;
+};
+
 type DriveForm = {
   protocol: ProtocolId;
   displayName: string;
@@ -311,6 +320,8 @@ function App() {
   const [mountPointCustom, setMountPointCustom] = useState(false);
   const [suggestingMountPoint, setSuggestingMountPoint] = useState(false);
   const [mountPointSuggestion, setMountPointSuggestion] = useState<MountPointSuggestion | null>(null);
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
 
   const daemonRunning = overview.daemon.running;
   const selectedProtocol = protocols.find((protocol) => protocol.id === drive.protocol) ?? protocols[0];
@@ -372,6 +383,7 @@ function App() {
         updateActiveMounts([], nextOverview.drives);
         if (showOutput) setOutput({ service: "offline" });
       }
+      await loadActivityLog(false);
     } catch (err) {
       const rawMessage = rawErrorMessage(err);
       if (showOutput || !isTauriBridgeError(rawMessage)) {
@@ -379,6 +391,24 @@ function App() {
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadActivityLog(showOutput = false) {
+    setLoadingActivity(true);
+    try {
+      const entries = await invoke<ActivityLogEntry[]>("get_activity_log", { limit: 40 });
+      setActivityLog(entries);
+      if (showOutput) setOutput(entries);
+      return entries;
+    } catch (err) {
+      const rawMessage = rawErrorMessage(err);
+      if (!isTauriBridgeError(rawMessage)) {
+        setError(formatErrorMessage(rawMessage));
+      }
+      return [];
+    } finally {
+      setLoadingActivity(false);
     }
   }
 
@@ -395,6 +425,7 @@ function App() {
       } else if (refreshMounts) {
         await refreshMountsFromDaemon(false, nextOverview.drives);
       }
+      await loadActivityLog(false);
       return result;
     } catch (err) {
       setError(errorMessage(err));
@@ -448,6 +479,7 @@ function App() {
       if (nextOverview.daemon.running) {
         await refreshMountsFromDaemon(false, nextOverview.drives);
       }
+      await loadActivityLog(false);
     } catch (err) {
       setError(errorMessage(err));
       setDiagnosticsOpen(true);
@@ -472,6 +504,7 @@ function App() {
       if (nextOverview.daemon.running) {
         await refreshMountsFromDaemon(false, nextOverview.drives);
       }
+      await loadActivityLog(false);
     } catch (err) {
       setError(errorMessage(err));
       setDiagnosticsOpen(true);
@@ -599,6 +632,15 @@ function App() {
     }
   }
 
+  async function openLogFile() {
+    setError(null);
+    try {
+      await openPath(overview.paths.rcloneLog);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   function selectProtocol(protocol: ProtocolId) {
     setDrive((current) => {
       const next = makeDefaultForm(protocol);
@@ -664,6 +706,7 @@ function App() {
       } else {
         updateActiveMounts([], latestOverview.drives);
       }
+      await loadActivityLog(false);
     } catch (err) {
       const rawMessage = rawErrorMessage(err);
       if (!isTauriBridgeError(rawMessage)) {
@@ -1058,6 +1101,13 @@ function App() {
             </section>
 
             <section className={`pane-section diagnostics-section ${diagnosticsOpen ? "diagnostics-section-open" : ""}`}>
+              <ActivityPanel
+                entries={activityLog}
+                busy={loadingActivity}
+                logPath={overview.paths.rcloneLog}
+                onRefresh={() => void loadActivityLog(true)}
+                onOpenLog={() => void openLogFile()}
+              />
               <button className="diagnostics-toggle" type="button" onClick={() => setDiagnosticsOpen((open) => !open)}>
                 <span>
                   <Terminal size={16} />
@@ -1576,6 +1626,66 @@ function CachePanel({
   );
 }
 
+function ActivityPanel({
+  entries,
+  busy,
+  logPath,
+  onRefresh,
+  onOpenLog,
+}: {
+  entries: ActivityLogEntry[];
+  busy: boolean;
+  logPath: string;
+  onRefresh: () => void;
+  onOpenLog: () => void;
+}) {
+  const visibleEntries = entries.slice(0, 6);
+  return (
+    <div className="activity-panel">
+      <div className="activity-heading">
+        <div>
+          <Activity size={16} />
+          <strong>Recent activity</strong>
+        </div>
+        <span>{entries.length > 0 ? `${entries.length} log lines` : "No logs yet"}</span>
+      </div>
+
+      {visibleEntries.length > 0 ? (
+        <div className="activity-list">
+          {visibleEntries.map((entry) => (
+            <div key={entry.id} className={`activity-item activity-item-${activityTone(entry.level)}`} title={entry.raw}>
+              <span className="activity-dot" />
+              <div>
+                <strong>{entry.message}</strong>
+                <small>
+                  {entry.source} · {formatActivityTime(entry.timestamp)}
+                </small>
+              </div>
+              <em>{entry.level || "info"}</em>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="activity-empty">
+          <Terminal size={16} />
+          <span>{busy ? "Reading activity..." : "Start the service or mount a drive to collect activity."}</span>
+        </div>
+      )}
+
+      <div className="activity-actions">
+        <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
+          {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+          <span>Refresh activity</span>
+        </button>
+        <button className="secondary-button" type="button" disabled={!logPath} onClick={onOpenLog}>
+          <ExternalLink size={15} />
+          <span>Open log</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DetailLine({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="detail-line">
@@ -1881,6 +1991,14 @@ function environmentTone(state: string): "good" | "warning" | "muted" {
   return "muted";
 }
 
+function activityTone(level: string) {
+  const lower = level.toLowerCase();
+  if (lower.includes("error") || lower.includes("fatal") || lower.includes("panic")) return "error";
+  if (lower.includes("warn")) return "warning";
+  if (lower.includes("debug") || lower.includes("trace")) return "muted";
+  return "info";
+}
+
 function protocolLabel(protocol: string) {
   const match = protocols.find((item) => item.id === protocol.toLowerCase());
   return match?.label ?? protocol;
@@ -1938,6 +2056,13 @@ function formatRelativeTime(timestamp: number) {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
+}
+
+function formatActivityTime(value: string) {
+  if (!value || value === "unknown time") return "unknown time";
+  const timestamp = Date.parse(value);
+  if (!Number.isNaN(timestamp)) return formatRelativeTime(timestamp);
+  return value;
 }
 
 function focusFirstCreateField() {
