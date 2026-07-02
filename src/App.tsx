@@ -26,6 +26,8 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { ActivityPanel } from "./features/activity/ActivityPanel";
+import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
 import { MountEnvironmentPanel } from "./features/driveSetup/MountEnvironmentPanel";
@@ -181,15 +183,6 @@ type ClearDriveCacheResult = {
   removedBytes: number;
   removedPaths: string[];
   warnings: string[];
-};
-
-type ActivityLogEntry = {
-  id: string;
-  timestamp: string;
-  level: string;
-  source: string;
-  message: string;
-  raw: string;
 };
 
 type ActionOptions = {
@@ -573,7 +566,7 @@ function App() {
   }
 
   function focusActivityPanel() {
-    document.querySelector(".activity-panel")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    document.querySelector("[data-activity-panel]")?.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   function selectProtocol(protocol: ProtocolId) {
@@ -1433,66 +1426,6 @@ function CachePanel({
   );
 }
 
-function ActivityPanel({
-  entries,
-  busy,
-  logPath,
-  onRefresh,
-  onOpenLog,
-}: {
-  entries: ActivityLogEntry[];
-  busy: boolean;
-  logPath: string;
-  onRefresh: () => void;
-  onOpenLog: () => void;
-}) {
-  const visibleEntries = entries.slice(0, 6);
-  return (
-    <div className="activity-panel">
-      <div className="activity-heading">
-        <div>
-          <Activity size={16} />
-          <strong>Recent activity</strong>
-        </div>
-        <span>{entries.length > 0 ? `${entries.length} events` : "No activity"}</span>
-      </div>
-
-      {visibleEntries.length > 0 ? (
-        <div className="activity-list">
-          {visibleEntries.map((entry) => (
-            <div key={entry.id} className={`activity-item activity-item-${activityTone(entry.level)}`} title={entry.raw}>
-              <span className="activity-dot" />
-              <div>
-                <strong>{entry.message}</strong>
-                <small>
-                  {entry.source} · {formatActivityTime(entry.timestamp)}
-                </small>
-              </div>
-              <em>{entry.level || "info"}</em>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="activity-empty">
-          <Terminal size={16} />
-          <span>{busy ? "Reading activity..." : "Start the service or mount a drive to collect activity."}</span>
-        </div>
-      )}
-
-      <div className="activity-actions">
-        <button className="secondary-button" type="button" disabled={busy} onClick={onRefresh}>
-          {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-          <span>Refresh activity</span>
-        </button>
-        <button className="secondary-button" type="button" disabled={!logPath} onClick={onOpenLog}>
-          <ExternalLink size={15} />
-          <span>Open log</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function DetailLine({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="detail-line">
@@ -1735,14 +1668,6 @@ function stringField(record: Record<string, JsonValue>, keys: string[]) {
   return null;
 }
 
-function activityTone(level: string) {
-  const lower = level.toLowerCase();
-  if (lower.includes("error") || lower.includes("fatal") || lower.includes("panic")) return "error";
-  if (lower.includes("warn")) return "warning";
-  if (lower.includes("debug") || lower.includes("trace")) return "muted";
-  return "info";
-}
-
 function protocolLabel(protocol: string) {
   const match = protocols.find((item) => item.id === protocol.toLowerCase());
   return match?.label ?? protocol;
@@ -1823,14 +1748,6 @@ function formatRelativeTime(timestamp: number) {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
-}
-
-function formatActivityTime(value: string) {
-  if (!value || value === "unknown time") return "unknown time";
-  if (/^\d+$/.test(value)) return formatRelativeTime(Number(value));
-  const timestamp = Date.parse(value);
-  if (!Number.isNaN(timestamp)) return formatRelativeTime(timestamp);
-  return value;
 }
 
 function focusFirstCreateField() {
