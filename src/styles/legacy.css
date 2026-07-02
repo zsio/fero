@@ -859,44 +859,6 @@ button:disabled {
   color: #66727e;
 }
 
-.mount-recommendation {
-  display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #12181d;
-  padding: 7px 8px 7px 10px;
-  color: var(--muted);
-}
-
-.mount-recommendation-active {
-  border-color: rgba(117, 215, 180, 0.36);
-  background: rgba(117, 215, 180, 0.07);
-}
-
-.mount-recommendation > div {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.mount-recommendation strong {
-  overflow: hidden;
-  color: var(--muted-strong);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 12px;
-  font-weight: 560;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .submit-button {
   width: 100%;
   min-height: 38px;

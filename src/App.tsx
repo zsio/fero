@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import { MountPointRecommendation } from "./features/driveSetup/MountPointRecommendation";
 import { ProtocolHint, ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
 import {
   cacheLabelFromString,
@@ -1080,33 +1081,6 @@ function App() {
         </div>
       </section>
     </main>
-  );
-}
-
-function MountPointRecommendation({
-  suggestion,
-  active,
-  busy,
-  onUse,
-}: {
-  suggestion: MountPointSuggestion | null;
-  active: boolean;
-  busy: boolean;
-  onUse: () => void;
-}) {
-  const path = suggestion?.path ?? "Resolving recommended folder";
-  return (
-    <div className={`mount-recommendation ${active ? "mount-recommendation-active" : ""}`}>
-      <div>
-        <FolderPlus size={15} />
-        <span>Recommended folder</span>
-      </div>
-      <strong title={path}>{shortPath(path)}</strong>
-      <button className="field-action" type="button" disabled={busy} onClick={onUse}>
-        {busy ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
-        <span>Use</span>
-      </button>
-    </div>
   );
 }
 
