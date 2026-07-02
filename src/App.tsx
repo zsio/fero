@@ -53,7 +53,7 @@ import type { DriveRowView } from "./features/driveLibrary/DriveRow";
 import { EmptyDriveDetails } from "./features/driveLibrary/EmptyDriveDetails";
 import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import { MountDetails } from "./features/driveLibrary/MountDetails";
-import type { MountDetailsDrive } from "./features/driveLibrary/MountDetails";
+import type { MountDetailsActivity, MountDetailsDrive } from "./features/driveLibrary/MountDetails";
 import {
   DetailPane,
   DiagnosticOutput,
@@ -260,6 +260,10 @@ function App() {
   const selectedDrive = useMemo(
     () => driveItems.find((item) => item.id === selectedDriveId) ?? driveItems[0] ?? null,
     [driveItems, selectedDriveId],
+  );
+  const selectedDriveEvents = useMemo(
+    () => (selectedDrive ? driveActivityEntries(selectedDrive, activityLog) : []),
+    [activityLog, selectedDrive],
   );
 
   const canTestDrive = canTestDriveForm(drive);
@@ -516,6 +520,7 @@ function App() {
       const result = await invoke<ClearDriveCacheResult>("clear_drive_cache", { driveId: item.id });
       setCacheStatusByDrive((current) => ({ ...current, [item.id]: result.status }));
       setOutput(result);
+      await loadActivityLog(false);
       if (result.warnings.length > 0) {
         setDiagnosticsOpen(true);
       }
@@ -842,6 +847,7 @@ function App() {
                   busy={busy}
                   cacheStatus={cacheStatusByDrive[selectedDrive.id] ?? null}
                   cacheBusy={cacheBusyDriveId === selectedDrive.id}
+                  events={selectedDriveEvents}
                   onMount={() => void mountSavedDrive(selectedDrive)}
                   onOpen={() => void openLocalFolder(selectedDrive)}
                   onUnmount={() =>
@@ -1162,6 +1168,29 @@ function driveDetailsView(drive: DriveListItem): MountDetailsDrive {
     lastIssueDetails: drive.lastIssueDetails,
     lastCheckedAt: drive.lastCheckedAt,
   };
+}
+
+function driveActivityEntries(drive: DriveListItem, entries: ActivityLogEntry[]): MountDetailsActivity[] {
+  const endpoint = driveEndpointLabel(drive);
+  const tokens = [drive.displayName, drive.mountPoint, drive.remote, drive.fs, endpoint]
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.length > 1);
+
+  if (tokens.length === 0) return [];
+
+  return entries
+    .filter((entry) => {
+      const haystack = `${entry.message} ${entry.raw}`.toLowerCase();
+      return tokens.some((token) => haystack.includes(token));
+    })
+    .slice(0, 3)
+    .map((entry) => ({
+      id: entry.id,
+      timestamp: entry.timestamp,
+      level: entry.level,
+      message: entry.message,
+      source: entry.source,
+    }));
 }
 
 function driveEndpointLabel(drive: DriveListItem) {

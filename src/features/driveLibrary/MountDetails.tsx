@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
   Cloud,
@@ -37,6 +38,14 @@ export type MountDetailsDrive = {
   lastCheckedAt?: number | null;
 };
 
+export type MountDetailsActivity = {
+  id: string;
+  timestamp: string;
+  level: string;
+  message: string;
+  source: string;
+};
+
 const detailsClassName = "grid gap-2 px-[14px] pb-[14px]";
 const stateCardClassName =
   "grid min-h-[66px] grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border border-[var(--line)] bg-[#12181d] px-3 py-2.5";
@@ -59,6 +68,23 @@ const dangerButtonClassName =
 const issueClassName =
   "grid gap-[7px] rounded-lg border border-[rgba(239,196,90,0.36)] bg-[rgba(239,196,90,0.09)] px-[11px] py-2.5 text-xs leading-normal text-[var(--muted-strong)]";
 const issueHeadingClassName = "flex items-center gap-2 text-[var(--amber)]";
+const activityPanelClassName = "grid gap-2 rounded-lg border border-[var(--line)] bg-[#12181d] px-[11px] py-2.5";
+const activityHeadingClassName = "flex items-center justify-between gap-2.5";
+const activityTitleClassName = "flex min-w-0 items-center gap-2 text-[var(--accent)]";
+const activityCountClassName = "shrink-0 text-xs text-[var(--muted)]";
+const activityListClassName = "grid gap-[7px]";
+const activityItemClassName =
+  "grid min-h-10 grid-cols-[7px_minmax(0,1fr)] items-center gap-[9px] rounded-[7px] border border-[rgba(48,58,67,0.78)] bg-[#10161b] px-2.5 py-2";
+const activityMessageClassName = "block truncate text-xs font-semibold text-[var(--ink-strong)]";
+const activityMetaClassName = "mt-[3px] block truncate text-[11px] text-[var(--muted)]";
+const activityEmptyClassName =
+  "rounded-[7px] border border-[rgba(48,58,67,0.72)] bg-[#10161b] px-2.5 py-2 text-xs text-[var(--muted)]";
+const activityDotClassNames = {
+  info: "bg-[var(--accent)]",
+  warning: "bg-[var(--amber)]",
+  error: "bg-[var(--danger)]",
+  muted: "bg-[var(--muted)]",
+};
 
 const stateToneClassNames = {
   mounted: {
@@ -80,6 +106,7 @@ export function MountDetails({
   busy,
   cacheStatus,
   cacheBusy,
+  events,
   onMount,
   onOpen,
   onUnmount,
@@ -93,6 +120,7 @@ export function MountDetails({
   busy: boolean;
   cacheStatus: DriveCacheStatus | null;
   cacheBusy: boolean;
+  events: MountDetailsActivity[];
   onMount: () => void;
   onOpen: () => void;
   onUnmount: () => void;
@@ -113,6 +141,7 @@ export function MountDetails({
       <DetailLine icon={RefreshCw} label="Restore" value={drive.autoMount ? "On launch" : "Manual"} />
       <DetailLine icon={LockKeyhole} label="Access" value={drive.readOnly ? "Read-only" : "Read/write"} />
       {drive.lastIssueSummary && <MountIssuePanel drive={drive} />}
+      <DriveActivityPanel events={events} />
       <CachePanel
         cacheMode={drive.cacheMode}
         status={cacheStatus}
@@ -157,6 +186,41 @@ export function MountDetails({
         <Trash2 size={15} />
         <span>Remove from Fero</span>
       </button>
+    </div>
+  );
+}
+
+function DriveActivityPanel({ events }: { events: MountDetailsActivity[] }) {
+  return (
+    <div className={activityPanelClassName} aria-label="Drive activity">
+      <div className={activityHeadingClassName}>
+        <div className={activityTitleClassName}>
+          <Activity size={15} />
+          <strong className="text-[13px] font-bold text-[var(--ink-strong)]">Drive activity</strong>
+        </div>
+        <span className={activityCountClassName}>{events.length > 0 ? `${events.length} recent` : "No events"}</span>
+      </div>
+
+      {events.length > 0 ? (
+        <div className={activityListClassName}>
+          {events.map((event) => {
+            const tone = activityTone(event.level);
+            return (
+              <div className={activityItemClassName} key={event.id} title={event.message}>
+                <span className={`size-[7px] rounded-full ${activityDotClassNames[tone]}`} />
+                <div className="min-w-0">
+                  <strong className={activityMessageClassName}>{event.message}</strong>
+                  <small className={activityMetaClassName}>
+                    {event.source} / {formatActivityTime(event.timestamp)}
+                  </small>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className={activityEmptyClassName}>No recent events for this drive.</div>
+      )}
     </div>
   );
 }
@@ -215,4 +279,20 @@ function formatRelativeTime(timestamp: number) {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
+}
+
+function activityTone(level: string): "info" | "warning" | "error" | "muted" {
+  const lower = level.toLowerCase();
+  if (lower.includes("error") || lower.includes("fatal") || lower.includes("panic")) return "error";
+  if (lower.includes("warn")) return "warning";
+  if (lower.includes("debug") || lower.includes("trace")) return "muted";
+  return "info";
+}
+
+function formatActivityTime(value: string) {
+  if (!value || value === "unknown time") return "unknown time";
+  if (/^\d+$/.test(value)) return formatRelativeTime(Number(value));
+  const timestamp = Date.parse(value);
+  if (!Number.isNaN(timestamp)) return formatRelativeTime(timestamp);
+  return value;
 }

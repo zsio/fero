@@ -1187,6 +1187,13 @@ fn find_saved_drive(app: &AppHandle, drive_id: &str) -> Result<SavedDrive, Strin
         .ok_or_else(|| "saved drive was not found".to_string())
 }
 
+fn find_saved_drive_by_mount_point(app: &AppHandle, mount_point: &str) -> Option<SavedDrive> {
+    read_drive_catalog(app)
+        .ok()?
+        .into_iter()
+        .find(|drive| drive.mount_point == mount_point)
+}
+
 fn update_drive_auto_mount(
     app: &AppHandle,
     drive_id: &str,
@@ -2333,15 +2340,29 @@ fn unmount(
     state: State<'_, AppState>,
     mount_point: String,
 ) -> Result<Value, String> {
+    let drive = find_saved_drive_by_mount_point(&app, &mount_point);
     let mut manager = lock_manager(&state)?;
     manager.ensure_started(&app)?;
-    let result = manager.call_rc("mount/unmount", json!({ "mountPoint": mount_point }));
+    let result = manager.call_rc("mount/unmount", json!({ "mountPoint": &mount_point }));
     match &result {
         Ok(_) => {
-            let _ = record_activity(&app, "info", "Fero", "Drive unmounted.");
+            let message = drive
+                .as_ref()
+                .map(|drive| {
+                    format!(
+                        "Unmounted \"{}\" from {}.",
+                        drive.display_name, drive.mount_point
+                    )
+                })
+                .unwrap_or_else(|| format!("Drive unmounted from {mount_point}."));
+            let _ = record_activity(&app, "info", "Fero", &message);
         }
         Err(err) => {
-            let _ = record_activity(&app, "error", "Fero", &format!("Unmount failed: {err}"));
+            let message = drive
+                .as_ref()
+                .map(|drive| format!("Unmount failed for \"{}\": {err}", drive.display_name))
+                .unwrap_or_else(|| format!("Unmount failed for {mount_point}: {err}"));
+            let _ = record_activity(&app, "error", "Fero", &message);
         }
     }
     result
