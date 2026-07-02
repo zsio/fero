@@ -12,7 +12,6 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
-  KeyRound,
   Loader2,
   Pencil,
   Play,
@@ -28,6 +27,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import { ProtocolHint, ProtocolPicker, SetupRail } from "./features/driveSetup/ProtocolSetup";
 import {
   cacheLabelFromString,
   canSaveDriveForm,
@@ -42,7 +42,6 @@ import type {
   CacheMode,
   DriveForm,
   MountPointSuggestion,
-  ProtocolDefinition,
   ProtocolId,
 } from "./features/driveSetup/model";
 import "./styles/index.css";
@@ -1081,61 +1080,6 @@ function App() {
         </div>
       </section>
     </main>
-  );
-}
-
-function ProtocolPicker({ selected, onSelect }: { selected: ProtocolId; onSelect: (protocol: ProtocolId) => void }) {
-  return (
-    <div className="protocol-grid" aria-label="Choose a protocol">
-      {protocols.map((protocol) => {
-        const Icon = protocol.icon;
-        const active = protocol.id === selected;
-        return (
-          <button
-            key={protocol.id}
-            className={`protocol-option ${active ? "protocol-option-active" : ""}`}
-            type="button"
-            onClick={() => onSelect(protocol.id)}
-          >
-            <Icon size={18} />
-            <span>{protocol.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function SetupRail({ protocol }: { protocol: ProtocolDefinition }) {
-  const ProtocolIcon = protocol.icon;
-  const steps = [
-    { icon: ProtocolIcon, label: protocol.label },
-    { icon: KeyRound, label: "Credentials" },
-    { icon: FolderOpen, label: "Local folder" },
-    { icon: Play, label: "Mount" },
-  ];
-
-  return (
-    <div className="setup-rail" aria-label="Drive setup path">
-      {steps.map((step) => {
-        const Icon = step.icon;
-        return (
-          <div key={step.label}>
-            <Icon size={14} />
-            <span>{step.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ProtocolHint({ protocol }: { protocol: ProtocolDefinition }) {
-  return (
-    <div className="protocol-hint">
-      <KeyRound size={15} />
-      <span>{protocol.hint}</span>
-    </div>
   );
 }
 
