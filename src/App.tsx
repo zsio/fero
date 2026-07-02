@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { confirm as confirmDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -24,6 +23,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ActivityPanel } from "./features/activity/ActivityPanel";
 import type { ActivityLogEntry } from "./features/activity/ActivityPanel";
+import { AppShell, WorkspaceSurface } from "./features/appLayout/AppLayout";
 import { formatBytes } from "./features/cache/model";
 import type { ClearDriveCacheResult, DriveCacheStatus } from "./features/cache/model";
 import { ConnectionTestPanel } from "./features/driveSetup/ConnectionTestPanel";
@@ -43,7 +43,6 @@ import {
   normalizeCacheMode,
   normalizeProtocolId,
   protocols,
-  shortPath,
 } from "./features/driveSetup/model";
 import type {
   DriveForm,
@@ -58,6 +57,14 @@ import { EmptyDriveDetails } from "./features/driveLibrary/EmptyDriveDetails";
 import { EmptyDriveList } from "./features/driveLibrary/EmptyDriveList";
 import { MountDetails } from "./features/driveLibrary/MountDetails";
 import type { MountDetailsDrive } from "./features/driveLibrary/MountDetails";
+import {
+  PaneHeader,
+  PathLine,
+  StatusStrip,
+  StatusTile,
+  ToolbarButton,
+  WorkspaceHeader,
+} from "./features/workspace/WorkspaceChrome";
 import "./styles/index.css";
 
 type JsonValue = unknown;
@@ -679,7 +686,7 @@ function App() {
   }, [drive.displayName, overview.paths.defaultMountRoot, mountPointCustom]);
 
   return (
-    <main className="app-shell">
+    <AppShell>
       <aside className="sidebar" aria-label="Fero navigation">
         <div className="brand">
           <div className="brand-mark">
@@ -762,26 +769,20 @@ function App() {
         </div>
       </aside>
 
-      <section className="workspace">
-        <header className="workspace-header">
-          <div>
-            <div className="section-kicker">
-              <Wifi size={14} />
-              <span>Local drive workspace</span>
-            </div>
-            <h2>Drives</h2>
-            <p>WebDAV, SFTP, FTP and SMB storage mounted into local folders.</p>
-          </div>
-
-          <div className="toolbar">
-            <ToolbarButton icon={RefreshCw} disabled={busy} onClick={() => void refreshAll(true)}>
-              Refresh
-            </ToolbarButton>
-            <ToolbarButton icon={Plus} variant="primary" disabled={busy} onClick={() => focusFirstCreateField()}>
-              Add drive
-            </ToolbarButton>
-          </div>
-        </header>
+      <WorkspaceSurface>
+        <WorkspaceHeader
+          kickerIcon={Wifi}
+          kicker="Local drive workspace"
+          title="Drives"
+          description="WebDAV, SFTP, FTP and SMB storage mounted into local folders."
+        >
+          <ToolbarButton icon={RefreshCw} disabled={busy} onClick={() => void refreshAll(true)}>
+            Refresh
+          </ToolbarButton>
+          <ToolbarButton icon={Plus} variant="primary" disabled={busy} onClick={() => focusFirstCreateField()}>
+            Add drive
+          </ToolbarButton>
+        </WorkspaceHeader>
 
         {error && (
           <div className="error-banner" role="alert">
@@ -790,14 +791,14 @@ function App() {
           </div>
         )}
 
-        <section className="status-strip" aria-label="Overview">
+        <StatusStrip>
           <StatusTile icon={HardDrive} label="Drive library" value={String(driveItems.length)} tone={driveItems.length > 0 ? "good" : "muted"} />
           <StatusTile icon={FolderOpen} label="Mounted" value={`${mountedDriveCount}/${driveItems.length}`} tone={mountedDriveCount > 0 ? "good" : "muted"} />
           <StatusTile icon={Play} label="Ready" value={String(readyDriveCount)} tone={readyDriveCount > 0 ? "good" : "muted"} />
           <StatusTile icon={AlertTriangle} label="Needs attention" value={String(attentionCount)} tone={attentionCount > 0 ? "warning" : "muted"} />
           <StatusTile icon={ShieldCheck} label="Mount system" value={mountEnvironmentValue} tone={mountEnvironmentTone} />
           <StatusTile icon={Database} label="Cache" value={cacheOverviewValue} tone={scannedCacheCount > 0 ? "default" : "muted"} />
-        </section>
+        </StatusStrip>
 
         <div className="home-grid">
           <section className="drive-pane">
@@ -952,66 +953,13 @@ function App() {
             </section>
           </aside>
         </div>
-      </section>
-    </main>
-  );
-}
-
-function ToolbarButton({
-  icon: Icon,
-  children,
-  variant = "default",
-  className = "",
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  icon: LucideIcon;
-  children: ReactNode;
-  variant?: "default" | "primary";
-}) {
-  return (
-    <button className={`tool-button tool-button-${variant} ${className}`} type="button" {...props}>
-      <Icon size={16} />
-      <span>{children}</span>
-    </button>
+      </WorkspaceSurface>
+    </AppShell>
   );
 }
 
 function StatusDot({ active }: { active: boolean }) {
   return <span className={`status-dot ${active ? "status-dot-active" : ""}`} aria-hidden="true" />;
-}
-
-function StatusTile({
-  icon: Icon,
-  label,
-  value,
-  tone = "default",
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-  tone?: "default" | "good" | "muted" | "warning";
-}) {
-  return (
-    <div className={`status-tile status-tile-${tone}`}>
-      <Icon size={17} />
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-      </div>
-    </div>
-  );
-}
-
-function PaneHeader({ title, meta, icon: Icon }: { title: string; meta: string; icon: LucideIcon }) {
-  return (
-    <div className="pane-header">
-      <div>
-        <Icon size={16} />
-        <h3>{title}</h3>
-      </div>
-      <span>{meta}</span>
-    </div>
-  );
 }
 
 function EditDriveSettings({
@@ -1079,16 +1027,6 @@ function EditDriveSettings({
         Cancel
       </FormButton>
     </DriveSetupForm>
-  );
-}
-
-function PathLine({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return (
-    <div className="path-line">
-      <Icon size={14} />
-      <span>{label}</span>
-      <strong title={value}>{shortPath(value)}</strong>
-    </div>
   );
 }
 
