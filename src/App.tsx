@@ -11,17 +11,13 @@ import {
   ExternalLink,
   FolderOpen,
   FolderPlus,
-  Globe2,
   HardDrive,
   KeyRound,
   Loader2,
-  LockKeyhole,
-  Network,
   Pencil,
   Play,
   Plus,
   RefreshCw,
-  Server,
   Settings,
   ShieldCheck,
   Square,
@@ -31,11 +27,27 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { DriveReadinessPanel } from "./features/driveSetup/DriveReadinessPanel";
+import {
+  cacheLabelFromString,
+  canSaveDriveForm,
+  canTestDriveForm,
+  makeDefaultForm,
+  normalizeCacheMode,
+  normalizeProtocolId,
+  protocols,
+  shortPath,
+} from "./features/driveSetup/model";
+import type {
+  CacheMode,
+  DriveForm,
+  MountPointSuggestion,
+  ProtocolDefinition,
+  ProtocolId,
+} from "./features/driveSetup/model";
 import "./styles/index.css";
 
 type JsonValue = unknown;
-type ProtocolId = "webdav" | "ftp" | "sftp" | "smb";
-type CacheMode = "smart" | "full" | "off";
 
 type DaemonStatus = {
   running: boolean;
@@ -181,11 +193,6 @@ type ClearDriveCacheResult = {
   warnings: string[];
 };
 
-type MountPointSuggestion = {
-  root: string;
-  path: string;
-};
-
 type ActivityLogEntry = {
   id: string;
   timestamp: string;
@@ -195,80 +202,11 @@ type ActivityLogEntry = {
   raw: string;
 };
 
-type DriveForm = {
-  protocol: ProtocolId;
-  displayName: string;
-  url: string;
-  host: string;
-  port: string;
-  username: string;
-  password: string;
-  domain: string;
-  share: string;
-  remotePath: string;
-  mountPoint: string;
-  webdavVendor: string;
-  cacheMode: CacheMode;
-};
-
 type ActionOptions = {
   showOutput?: boolean;
   refreshMounts?: boolean;
   clearMounts?: boolean;
 };
-
-type ProtocolDefinition = {
-  id: ProtocolId;
-  label: string;
-  summary: string;
-  hint: string;
-  icon: LucideIcon;
-  defaultName: string;
-  defaultPort: string;
-  needsUrl?: boolean;
-  needsShare?: boolean;
-};
-
-const protocols: ProtocolDefinition[] = [
-  {
-    id: "webdav",
-    label: "WebDAV",
-    summary: "NAS, Nextcloud, Seafile and many private clouds",
-    hint: "Paste the WebDAV address from your service.",
-    icon: Globe2,
-    defaultName: "My WebDAV",
-    defaultPort: "",
-    needsUrl: true,
-  },
-  {
-    id: "sftp",
-    label: "SFTP",
-    summary: "Secure SSH file servers",
-    hint: "Use the SSH host, username and password for this server.",
-    icon: LockKeyhole,
-    defaultName: "My SFTP",
-    defaultPort: "22",
-  },
-  {
-    id: "ftp",
-    label: "FTP",
-    summary: "Classic FTP storage and hosting spaces",
-    hint: "Use FTP for legacy servers. Prefer SFTP when available.",
-    icon: Server,
-    defaultName: "My FTP",
-    defaultPort: "21",
-  },
-  {
-    id: "smb",
-    label: "SMB",
-    summary: "Windows shares and local network NAS",
-    hint: "Enter the server and share name, such as NAS and Media.",
-    icon: Network,
-    defaultName: "My SMB Share",
-    defaultPort: "",
-    needsShare: true,
-  },
-];
 
 const emptyOverview: AppOverview = {
   productName: "Fero",
@@ -1253,60 +1191,6 @@ function MountEnvironmentPanel({ environment }: { environment: MountEnvironment 
   );
 }
 
-function DriveReadinessPanel({
-  form,
-  protocol,
-  suggestion,
-}: {
-  form: DriveForm;
-  protocol: ProtocolDefinition;
-  suggestion: MountPointSuggestion | null;
-}) {
-  const items = driveReadinessItems(form, protocol, suggestion);
-  const pendingCount = items.filter((item) => !item.ready).length;
-  const canTest = canTestDriveForm(form);
-  const canSave = canSaveDriveForm(form);
-  const Icon = canSave ? ShieldCheck : AlertTriangle;
-  const status = canSave ? "Ready to mount" : canTest ? "Name this drive" : "Connection details needed";
-  const panelTone = canSave
-    ? "border-[rgba(117,215,180,0.34)] bg-[rgba(117,215,180,0.07)]"
-    : "border-[rgba(239,196,90,0.34)] bg-[rgba(239,196,90,0.07)]";
-  const headingTone = canSave ? "text-[var(--accent)]" : "text-[var(--amber)]";
-
-  return (
-    <div className={`mx-[14px] mb-2.5 grid gap-2 rounded-lg border px-2.5 py-[9px] ${panelTone}`}>
-      <div className="flex items-center justify-between gap-2.5">
-        <div className={`flex min-w-0 items-center gap-[7px] ${headingTone}`}>
-          <Icon size={15} />
-          <strong className="truncate text-xs font-bold text-[var(--ink-strong)]">{status}</strong>
-        </div>
-        <span className="shrink-0 text-[11px] text-[var(--muted)]">
-          {pendingCount === 0 ? "All set" : `${pendingCount} pending`}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-1.5">
-        {items.map((item) => {
-          const ItemIcon = item.icon;
-          return (
-            <div
-              key={item.label}
-              className={`grid min-h-7 min-w-0 grid-cols-[16px_minmax(54px,0.9fr)_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] border border-[rgba(48,58,67,0.72)] bg-[#11171c] px-2 py-1.5 text-[11px] ${
-                item.ready ? "text-[var(--accent)]" : "text-[var(--muted)]"
-              }`}
-            >
-              <ItemIcon size={14} />
-              <span className="truncate">{item.label}</span>
-              <strong className="truncate text-right font-semibold text-[var(--muted-strong)]" title={item.value}>
-                {item.value}
-              </strong>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ToolbarButton({
   icon: Icon,
   children,
@@ -1872,100 +1756,6 @@ function PathLine({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
   );
 }
 
-function makeDefaultForm(protocol: ProtocolId): DriveForm {
-  const definition = protocols.find((item) => item.id === protocol) ?? protocols[0];
-  return {
-    protocol,
-    displayName: definition.defaultName,
-    url: "",
-    host: "",
-    port: definition.defaultPort,
-    username: "",
-    password: "",
-    domain: "",
-    share: "",
-    remotePath: "",
-    mountPoint: "",
-    webdavVendor: "other",
-    cacheMode: "smart",
-  };
-}
-
-function canTestDriveForm(form: DriveForm) {
-  return Boolean(
-    (form.protocol === "webdav" ? form.url.trim() : form.host.trim()) &&
-      (form.protocol === "smb" ? form.share.trim() : true),
-  );
-}
-
-function canSaveDriveForm(form: DriveForm) {
-  return Boolean(form.displayName.trim() && canTestDriveForm(form));
-}
-
-function driveReadinessItems(
-  form: DriveForm,
-  protocol: ProtocolDefinition,
-  suggestion: MountPointSuggestion | null,
-) {
-  const endpoint = endpointReadiness(form, protocol);
-  const localFolder = form.mountPoint.trim() || suggestion?.path || "";
-  return [
-    {
-      icon: HardDrive,
-      label: "Name",
-      ready: Boolean(form.displayName.trim()),
-      value: form.displayName.trim() || "Required",
-    },
-    endpoint,
-    {
-      icon: FolderOpen,
-      label: "Local folder",
-      ready: Boolean(localFolder),
-      value: localFolder ? shortPath(localFolder) : "Resolving",
-    },
-    {
-      icon: Database,
-      label: "Cache",
-      ready: true,
-      value: cacheLabelFromString(form.cacheMode),
-    },
-  ];
-}
-
-function endpointReadiness(form: DriveForm, protocol: ProtocolDefinition) {
-  if (form.protocol === "webdav") {
-    const url = form.url.trim();
-    return {
-      icon: protocol.icon,
-      label: "WebDAV address",
-      ready: Boolean(url),
-      value: url || "Required",
-    };
-  }
-
-  if (form.protocol === "smb") {
-    const host = form.host.trim();
-    const share = form.share.trim();
-    const value =
-      host && share ? `${host}/${share}` : host ? "Share required" : share ? "Server required" : "Server and share";
-    return {
-      icon: protocol.icon,
-      label: "SMB share",
-      ready: Boolean(host && share),
-      value,
-    };
-  }
-
-  const host = form.host.trim();
-  const port = form.port.trim();
-  return {
-    icon: protocol.icon,
-    label: `${protocol.label} server`,
-    ready: Boolean(host),
-    value: host ? `${host}${port ? `:${port}` : ""}` : "Required",
-  };
-}
-
 function formFromDriveItem(item: DriveListItem): DriveForm {
   const protocol = normalizeProtocolId(item.protocol);
   const definition = protocols.find((entry) => entry.id === protocol) ?? protocols[0];
@@ -2002,19 +1792,6 @@ function toNetworkDriveRequest(form: DriveForm) {
     webdavVendor: form.webdavVendor,
     cacheMode: form.cacheMode,
   };
-}
-
-function normalizeProtocolId(protocol: string): ProtocolId {
-  const lower = protocol.toLowerCase();
-  if (lower === "ftp" || lower === "sftp" || lower === "smb" || lower === "webdav") {
-    return lower;
-  }
-  return "webdav";
-}
-
-function normalizeCacheMode(mode: string): CacheMode {
-  if (mode === "full" || mode === "off" || mode === "smart") return mode;
-  return "smart";
 }
 
 function buildDriveList(savedDrives: SavedDrive[], activeMounts: MountSession[]): DriveListItem[] {
@@ -2146,13 +1923,6 @@ function stringField(record: Record<string, JsonValue>, keys: string[]) {
   return null;
 }
 
-function cacheLabelFromString(mode: string) {
-  if (mode === "full") return "Full cache";
-  if (mode === "off") return "No cache";
-  if (mode === "smart") return "Smart cache";
-  return mode || "Smart cache";
-}
-
 function environmentValue(state: string) {
   if (state === "ready") return "Ready";
   if (state === "needsSetup") return "Needs setup";
@@ -2194,13 +1964,6 @@ function driveEndpointLabel(drive: DriveListItem) {
   const host = drive.host ? `${drive.host}${drive.port ? `:${drive.port}` : ""}` : "";
   const remotePath = drive.remotePath ? `/${drive.remotePath.replace(/^\/+/, "")}` : "";
   return host ? `${host}${remotePath}` : drive.remote;
-}
-
-function shortPath(value: string) {
-  if (!value) return "not resolved";
-  const normalized = value.replace(/\\/g, "/");
-  const parts = normalized.split("/").filter(Boolean);
-  return parts.slice(-2).join("/") || value;
 }
 
 function safeFolderName(value: string) {
